@@ -1,5 +1,8 @@
 /backend/.venv
-
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 # dependencies
 /frontend/node_modules
 /.pnp

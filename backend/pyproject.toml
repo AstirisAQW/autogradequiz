@@ -20,7 +20,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.8.0"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -28,3 +35,6 @@ include = ["app*"]
 
 [tool.setuptools.package-data]
 "app.db" = ["schema.sql"]
+
+[tool.pytest.ini_options]
+python_classes = ["*Tests"]

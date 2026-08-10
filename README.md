@@ -9,6 +9,7 @@ See `AutoGradeQuiz_Documentation.md` for the full design: tech stack decisions, 
 The project uses a `frontend/` and `backend/` split, with a root `package.json` that only orchestrates both. This phase gets that structure in place and confirms both halves start up. No grading logic exists yet.
 
 **Done:**
+
 - Next.js app scaffolded and moved into `frontend/`
 - Tauri initialized inside `frontend/` (desktop shell)
 - `backend/pyproject.toml` defines the backend package and its dependencies
@@ -17,6 +18,7 @@ The project uses a `frontend/` and `backend/` split, with a root `package.json` 
 - Tesseract OCR installed and confirmed working (`C:\Program Files\Tesseract-OCR\tesseract.exe`, tested against a sample image)
 
 **Not done yet:**
+
 - `backend/app/` package skeleton (`api/`, `db/`, `grading/`, `models/`, `services/`)
 - A FastAPI entry point (`backend/app/main.py`) — the backend does not run yet
 - Root orchestrator `package.json` (`concurrently`, `dev` script)
@@ -91,14 +93,14 @@ autogradequiz/
 
 ## Tech stack
 
-| Layer | Choice | License |
-|---|---|---|
-| Frontend | Next.js + TypeScript + Tailwind CSS | MIT |
-| Desktop shell | Tauri | MIT / Apache 2.0 |
-| Image processing | OpenCV (Python) | Apache 2.0 |
-| OCR | Tesseract, via `pytesseract` | Apache 2.0 |
-| Backend | FastAPI | MIT |
-| Structured storage | SQLite | Public domain |
+| Layer              | Choice                              | License          |
+| ------------------ | ----------------------------------- | ---------------- |
+| Frontend           | Next.js + TypeScript + Tailwind CSS | MIT              |
+| Desktop shell      | Tauri                               | MIT / Apache 2.0 |
+| Image processing   | OpenCV (Python)                     | Apache 2.0       |
+| OCR                | Tesseract, via `pytesseract`        | Apache 2.0       |
+| Backend            | FastAPI                             | MIT              |
+| Structured storage | SQLite                              | Public domain    |
 
 All dependencies use permissive licenses. The project has no copyleft obligations.
 
