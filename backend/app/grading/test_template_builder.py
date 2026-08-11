@@ -41,16 +41,16 @@ def test_columns_cover_every_question_exactly_once(template_spec):
     assert sorted(covered_questions) == list(range(1, template_spec.question_count + 1))
 
 
-def test_twenty_question_template_has_no_mid_markers():
+def test_twenty_question_template_has_mid_markers():
     template = build_template(TWENTY_QUESTIONS)
 
-    assert template.mid_markers == []
+    assert len(template.mid_markers) == 2
 
 
 def test_fifty_question_template_has_mid_markers():
     template = build_template(FIFTY_QUESTIONS)
 
-    assert len(template.mid_markers) == 3
+    assert len(template.mid_markers) == 2
 
 
 def test_hundred_question_template_has_mid_markers():
@@ -85,5 +85,5 @@ def test_template_to_json_dict_round_trips_question_count():
 
     assert json_dict["answer_grid"]["question_count"] == 50
     assert len(json_dict["fiducials"]["corners"]) == 4
-    assert len(json_dict["fiducials"]["mid_markers"]) == 3
+    assert len(json_dict["fiducials"]["mid_markers"]) == 2
     assert len(json_dict["text_fields"]) == 3

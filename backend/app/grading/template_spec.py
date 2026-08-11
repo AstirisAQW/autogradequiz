@@ -15,6 +15,10 @@ class TemplateSpec:
     question_count: int
     columns: tuple[ColumnSpecMm, ...]
     mid_marker_positions_mm: tuple[tuple[float, float], ...]
+    bubble_radius_mm: float
+    choice_spacing_mm: float
+    row_spacing_mm: float
+    font_size_pt: float
 
 
 @dataclass(frozen=True)

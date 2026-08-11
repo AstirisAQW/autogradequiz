@@ -80,9 +80,9 @@ def build_answer_grid(template_spec: TemplateSpec, page: PageSize) -> AnswerGrid
         question_count=template_spec.question_count,
         choices=list(ANSWER_CHOICES),
         columns=columns,
-        row_spacing=ROW_SPACING_MM / page.height_mm,
-        choice_spacing=CHOICE_SPACING_MM / page.width_mm,
-        bubble_radius=BUBBLE_RADIUS_MM / page.width_mm,
+        row_spacing=template_spec.row_spacing_mm / page.height_mm,
+        choice_spacing=template_spec.choice_spacing_mm / page.width_mm,
+        bubble_radius=template_spec.bubble_radius_mm / page.width_mm,
     )
 
 

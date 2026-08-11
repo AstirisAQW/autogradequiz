@@ -4,50 +4,51 @@ from app.grading.template_spec import ColumnSpecMm, TemplateSpec
 TWENTY_QUESTIONS = TemplateSpec(
     template_id="20q_a4",
     question_count=20,
+    bubble_radius_mm=3.0,
+    choice_spacing_mm=9.0,
+    row_spacing_mm=10.0,
+    font_size_pt=14.0,
     columns=(
-        ColumnSpecMm(origin_x_mm=30, origin_y_mm=55, question_start=1, question_end=10),
-        ColumnSpecMm(origin_x_mm=115, origin_y_mm=55, question_start=11, question_end=20),
+        ColumnSpecMm(40, 60.0, 1, 10),
+        ColumnSpecMm(120, 60.0, 11, 20),
     ),
-    mid_marker_positions_mm=(),
+    mid_marker_positions_mm=((6.0, 148.5), (196.0, 148.5)),
 )
-
-STACK_TOP_Y_MM = 55.0
-STACK_BOTTOM_Y_MM = 145.0
-MID_MARKER_Y_MM = 123.0
 
 FIFTY_QUESTIONS = TemplateSpec(
     template_id="50q_a4",
     question_count=50,
+    bubble_radius_mm=2.4,
+    choice_spacing_mm=7.0,
+    row_spacing_mm=8.0,
+    font_size_pt=10.0,
     columns=(
-        ColumnSpecMm(origin_x_mm=22, origin_y_mm=STACK_TOP_Y_MM, question_start=1, question_end=10),
-        ColumnSpecMm(origin_x_mm=22, origin_y_mm=STACK_BOTTOM_Y_MM, question_start=11, question_end=20),
-        ColumnSpecMm(origin_x_mm=72, origin_y_mm=STACK_TOP_Y_MM, question_start=21, question_end=30),
-        ColumnSpecMm(origin_x_mm=72, origin_y_mm=STACK_BOTTOM_Y_MM, question_start=31, question_end=40),
-        ColumnSpecMm(origin_x_mm=122, origin_y_mm=STACK_TOP_Y_MM, question_start=41, question_end=50),
+        ColumnSpecMm(25, 60.0, 1, 20),
+        ColumnSpecMm(85, 60.0, 21, 40),
+        ColumnSpecMm(145, 60.0, 41, 50),
     ),
-    mid_marker_positions_mm=((55, MID_MARKER_Y_MM), (105, MID_MARKER_Y_MM), (155, MID_MARKER_Y_MM)),
+    mid_marker_positions_mm=((6.0, 100.0), (196.0, 100.0)),
 )
 
 HUNDRED_QUESTIONS = TemplateSpec(
     template_id="100q_a4",
     question_count=100,
+    bubble_radius_mm=1.6,
+    choice_spacing_mm=5.5,
+    row_spacing_mm=6.5,
+    font_size_pt=8.0,
     columns=(
-        ColumnSpecMm(origin_x_mm=18, origin_y_mm=STACK_TOP_Y_MM, question_start=1, question_end=10),
-        ColumnSpecMm(origin_x_mm=18, origin_y_mm=STACK_BOTTOM_Y_MM, question_start=11, question_end=20),
-        ColumnSpecMm(origin_x_mm=58, origin_y_mm=STACK_TOP_Y_MM, question_start=21, question_end=30),
-        ColumnSpecMm(origin_x_mm=58, origin_y_mm=STACK_BOTTOM_Y_MM, question_start=31, question_end=40),
-        ColumnSpecMm(origin_x_mm=98, origin_y_mm=STACK_TOP_Y_MM, question_start=41, question_end=50),
-        ColumnSpecMm(origin_x_mm=98, origin_y_mm=STACK_BOTTOM_Y_MM, question_start=51, question_end=60),
-        ColumnSpecMm(origin_x_mm=138, origin_y_mm=STACK_TOP_Y_MM, question_start=61, question_end=70),
-        ColumnSpecMm(origin_x_mm=138, origin_y_mm=STACK_BOTTOM_Y_MM, question_start=71, question_end=80),
-        ColumnSpecMm(origin_x_mm=178, origin_y_mm=STACK_TOP_Y_MM, question_start=81, question_end=90),
-        ColumnSpecMm(origin_x_mm=178, origin_y_mm=STACK_BOTTOM_Y_MM, question_start=91, question_end=100),
+        ColumnSpecMm(26, 60.0, 1, 20),
+        ColumnSpecMm(61, 60.0, 21, 40),
+        ColumnSpecMm(96, 60.0, 41, 60),
+        ColumnSpecMm(131, 60.0, 61, 80),
+        ColumnSpecMm(166, 60.0, 81, 100),
     ),
     mid_marker_positions_mm=(
-        (40, MID_MARKER_Y_MM),
-        (90, MID_MARKER_Y_MM),
-        (140, MID_MARKER_Y_MM),
-        (190, MID_MARKER_Y_MM),
+        (6.0, 100.0),
+        (196.0, 100.0),
+        (6.0, 190.0),
+        (196.0, 190.0),
     ),
 )
 
@@ -59,12 +60,10 @@ TEMPLATE_CATALOG: dict[str, TemplateSpec] = {
 
 
 def get_template_spec(template_id: str) -> TemplateSpec:
-    """Return the spec for one template id, or raise UnknownTemplateError."""
     if template_id not in TEMPLATE_CATALOG:
         raise UnknownTemplateError(template_id)
     return TEMPLATE_CATALOG[template_id]
 
 
 def list_template_specs() -> list[TemplateSpec]:
-    """Return every template spec in the catalog."""
     return list(TEMPLATE_CATALOG.values())
