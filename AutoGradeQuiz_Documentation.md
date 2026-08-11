@@ -163,15 +163,14 @@ One shared schema, three filled-in instances — this keeps the grading code pat
     ]
   },
   "text_fields": [
-    { "id": "name", "x": 0, "y": 0, "width": 0, "height": 0, "cell_count": 15 },
-    { "id": "date", "x": 0, "y": 0, "width": 0, "height": 0, "cell_count": 8 },
+    { "id": "name", "x": 0, "y": 0, "width": 0, "height": 0 },
+    { "id": "date", "x": 0, "y": 0, "width": 0, "height": 0 },
     {
       "id": "section",
       "x": 0,
       "y": 0,
       "width": 0,
-      "height": 0,
-      "cell_count": 6
+      "height": 0
     }
   ],
   "answer_grid": {
