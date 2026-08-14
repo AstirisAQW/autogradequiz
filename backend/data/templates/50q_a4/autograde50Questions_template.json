@@ -1,0 +1,100 @@
+{
+  "template_id": "50q_a4",
+  "page": {
+    "width_mm": 210.0,
+    "height_mm": 297.0,
+    "dpi": 300
+  },
+  "fiducials": {
+    "corners": [
+      {
+        "id": "top_left",
+        "x": 0.028571,
+        "y": 0.020202
+      },
+      {
+        "id": "top_right",
+        "x": 0.933333,
+        "y": 0.020202
+      },
+      {
+        "id": "bottom_left",
+        "x": 0.028571,
+        "y": 0.952862
+      },
+      {
+        "id": "bottom_right",
+        "x": 0.933333,
+        "y": 0.952862
+      }
+    ],
+    "mid_markers": [
+      {
+        "id": "mid_0",
+        "x": 0.028571,
+        "y": 0.3367
+      },
+      {
+        "id": "mid_1",
+        "x": 0.933333,
+        "y": 0.3367
+      }
+    ]
+  },
+  "text_fields": [
+    {
+      "id": "name",
+      "x": 0.095238,
+      "y": 0.060606,
+      "width": 0.428571,
+      "height": 0.03367
+    },
+    {
+      "id": "date",
+      "x": 0.619048,
+      "y": 0.060606,
+      "width": 0.261905,
+      "height": 0.03367
+    },
+    {
+      "id": "section",
+      "x": 0.095238,
+      "y": 0.107744,
+      "width": 0.285714,
+      "height": 0.03367
+    }
+  ],
+  "answer_grid": {
+    "question_count": 50,
+    "choices": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E"
+    ],
+    "columns": [
+      {
+        "origin_x": 0.119048,
+        "origin_y": 0.20202,
+        "question_start": 1,
+        "question_end": 20
+      },
+      {
+        "origin_x": 0.404762,
+        "origin_y": 0.20202,
+        "question_start": 21,
+        "question_end": 40
+      },
+      {
+        "origin_x": 0.690476,
+        "origin_y": 0.20202,
+        "question_start": 41,
+        "question_end": 50
+      }
+    ],
+    "row_spacing": 0.026936,
+    "choice_spacing": 0.033333,
+    "bubble_radius": 0.011429
+  }
+}

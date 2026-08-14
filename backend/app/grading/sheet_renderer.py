@@ -30,6 +30,10 @@ def mm_to_px(x_mm: float, y_mm: float, page: PageSize) -> tuple[int, int]:
     return x_px, y_px
 
 
+def mm_length_to_px(length_mm: float, page: PageSize) -> int:
+    return int(length_mm / 25.4 * page.dpi)
+
+
 def blank_canvas(page: PageSize) -> np.ndarray:
     width_px, height_px = mm_to_px(page.width_mm, page.height_mm, page)
     return np.full((height_px, width_px, 3), 255, dtype=np.uint8)
@@ -71,7 +75,7 @@ def draw_bubble(
     canvas: np.ndarray, center_x_mm: float, center_y_mm: float, radius_mm: float, page: PageSize
 ) -> None:
     center = mm_to_px(center_x_mm, center_y_mm, page)
-    radius_px = int(radius_mm / 25.4 * page.dpi)
+    radius_px = mm_length_to_px(radius_mm, page)
     cv2.circle(canvas, center, radius_px, BUBBLE_GRAY, 2)
 
 
@@ -98,6 +102,41 @@ def row_group_count(row_index: int) -> int:
 
 def row_position_mm(column: ColumnSpecMm, row_index: int, row_spacing_mm: float) -> float:
     return column.origin_y_mm + row_index * row_spacing_mm + row_group_count(row_index) * ROW_GROUP_GAP_MM
+
+
+def find_column_for_question(
+    columns: tuple[ColumnSpecMm, ...], question_number: int
+) -> ColumnSpecMm:
+    for column in columns:
+        if column.question_start <= question_number <= column.question_end:
+            return column
+    raise ValueError(f"No column contains question {question_number}.")
+
+
+def bubble_position_mm(
+    template_spec: TemplateSpec, question_number: int, choice_index: int
+) -> tuple[float, float]:
+    """Return the (x_mm, y_mm) center of one answer bubble.
+
+    Uses the same column lookup and row-group-gap math as draw_answer_column, so a bubble
+    drawn on the rendered sheet and a bubble located for grading always agree.
+    """
+    column = find_column_for_question(template_spec.columns, question_number)
+    row_index = question_number - column.question_start
+    y_mm = row_position_mm(column, row_index, template_spec.row_spacing_mm)
+    x_mm = column.origin_x_mm + choice_index * template_spec.choice_spacing_mm
+    return x_mm, y_mm
+
+
+def bubble_position_px(
+    template_spec: TemplateSpec, question_number: int, choice_index: int, page: PageSize
+) -> tuple[int, int]:
+    x_mm, y_mm = bubble_position_mm(template_spec, question_number, choice_index)
+    return mm_to_px(x_mm, y_mm, page)
+
+
+def bubble_radius_px(template_spec: TemplateSpec, page: PageSize) -> int:
+    return mm_length_to_px(template_spec.bubble_radius_mm, page)
 
 
 def draw_row_group_marker(canvas: np.ndarray, x_mm: float, y_mm: float, page: PageSize) -> None:

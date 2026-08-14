@@ -1,0 +1,163 @@
+{
+  "seed": 4,
+  "template_id": "20q_a4",
+  "stray_mark_count": 0,
+  "questions": [
+    {
+      "question_number": 1,
+      "correct_choice": "D",
+      "marked_choices": [
+        "E"
+      ],
+      "mark_kind": "incomplete"
+    },
+    {
+      "question_number": 2,
+      "correct_choice": "E",
+      "marked_choices": [
+        "E"
+      ],
+      "mark_kind": "perfect"
+    },
+    {
+      "question_number": 3,
+      "correct_choice": "C",
+      "marked_choices": [
+        "D"
+      ],
+      "mark_kind": "perfect"
+    },
+    {
+      "question_number": 4,
+      "correct_choice": "D",
+      "marked_choices": [
+        "E"
+      ],
+      "mark_kind": "perfect"
+    },
+    {
+      "question_number": 5,
+      "correct_choice": "D",
+      "marked_choices": [
+        "E"
+      ],
+      "mark_kind": "incomplete"
+    },
+    {
+      "question_number": 6,
+      "correct_choice": "B",
+      "marked_choices": [
+        "E"
+      ],
+      "mark_kind": "perfect"
+    },
+    {
+      "question_number": 7,
+      "correct_choice": "E",
+      "marked_choices": [
+        "C"
+      ],
+      "mark_kind": "off_center"
+    },
+    {
+      "question_number": 8,
+      "correct_choice": "E",
+      "marked_choices": [
+        "E"
+      ],
+      "mark_kind": "perfect"
+    },
+    {
+      "question_number": 9,
+      "correct_choice": "D",
+      "marked_choices": [],
+      "mark_kind": "blank"
+    },
+    {
+      "question_number": 10,
+      "correct_choice": "E",
+      "marked_choices": [
+        "C"
+      ],
+      "mark_kind": "perfect"
+    },
+    {
+      "question_number": 11,
+      "correct_choice": "D",
+      "marked_choices": [
+        "C"
+      ],
+      "mark_kind": "light"
+    },
+    {
+      "question_number": 12,
+      "correct_choice": "E",
+      "marked_choices": [
+        "A"
+      ],
+      "mark_kind": "light"
+    },
+    {
+      "question_number": 13,
+      "correct_choice": "A",
+      "marked_choices": [
+        "C"
+      ],
+      "mark_kind": "perfect"
+    },
+    {
+      "question_number": 14,
+      "correct_choice": "C",
+      "marked_choices": [
+        "B"
+      ],
+      "mark_kind": "incomplete"
+    },
+    {
+      "question_number": 15,
+      "correct_choice": "E",
+      "marked_choices": [
+        "B"
+      ],
+      "mark_kind": "perfect"
+    },
+    {
+      "question_number": 16,
+      "correct_choice": "B",
+      "marked_choices": [
+        "C"
+      ],
+      "mark_kind": "incomplete"
+    },
+    {
+      "question_number": 17,
+      "correct_choice": "D",
+      "marked_choices": [],
+      "mark_kind": "blank"
+    },
+    {
+      "question_number": 18,
+      "correct_choice": "C",
+      "marked_choices": [
+        "C"
+      ],
+      "mark_kind": "perfect"
+    },
+    {
+      "question_number": 19,
+      "correct_choice": "E",
+      "marked_choices": [
+        "E"
+      ],
+      "mark_kind": "perfect"
+    },
+    {
+      "question_number": 20,
+      "correct_choice": "C",
+      "marked_choices": [
+        "D"
+      ],
+      "mark_kind": "perfect"
+    }
+  ]
+}
