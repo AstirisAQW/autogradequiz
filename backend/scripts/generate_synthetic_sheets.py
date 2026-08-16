@@ -32,12 +32,12 @@ def synthetic_sheets_output_dir() -> Path:
 
 
 def write_synthetic_sheet_files(
-    template_spec: TemplateSpec, seed: int, output_root: Path, write_pdf: bool
+    template_spec: TemplateSpec, seed: int, sample_name: str, output_root: Path, write_pdf: bool
 ) -> None:
     output_dir = output_root / template_spec.template_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    sheet = generate_synthetic_sheet(template_spec, seed)
+    sheet = generate_synthetic_sheet(template_spec, seed, sample_name=sample_name)
     stem = f"seed_{seed:04d}"
 
     image_path = output_dir / f"{stem}.png"
@@ -77,6 +77,12 @@ def main() -> None:
     parser.add_argument(
         "--start-seed", type=int, default=0, help="First seed to use; seeds count up from here."
     )
+    parser.add_argument(
+        "--start-index",
+        type=int,
+        default=1,
+        help="First number used for sample names ('Student 001', ...).",
+    )
     parser.add_argument("--pdf", action="store_true", help="Also write a PDF alongside the PNG.")
     args = parser.parse_args()
 
@@ -84,8 +90,9 @@ def main() -> None:
     output_root = synthetic_sheets_output_dir()
 
     for template_spec in template_specs:
-        for seed in range(args.start_seed, args.start_seed + args.count):
-            write_synthetic_sheet_files(template_spec, seed, output_root, args.pdf)
+        for offset, seed in enumerate(range(args.start_seed, args.start_seed + args.count)):
+            sample_name = f"Student {args.start_index + offset:03d}"
+            write_synthetic_sheet_files(template_spec, seed, sample_name, output_root, args.pdf)
 
 
 if __name__ == "__main__":
