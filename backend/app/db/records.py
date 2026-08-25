@@ -48,6 +48,13 @@ class ScanJobRecord:
 
 @dataclass(frozen=True)
 class NewScanResult:
+    """The fields save_scan_result writes on insert and on update.
+
+    Deliberately has no error_message: that column exists in scan_results but is
+    reserved for a later phase (see schema.sql and ScanResultRecord.error_message) until
+    there's a real grading-failure pipeline to decide what belongs in it.
+    """
+
     scan_job_id: int
     name_text: str
     date_text: str
@@ -61,6 +68,12 @@ class NewScanResult:
 
 @dataclass(frozen=True)
 class ScanResultRecord:
+    """A stored scan result, as read back from scan_results.
+
+    error_message: reserved for a later phase. save_scan_result never sets it, so this
+        is always ''.
+    """
+
     id: int
     scan_job_id: int
     name_text: str
