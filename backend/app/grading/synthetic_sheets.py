@@ -23,7 +23,6 @@ import cv2
 import numpy as np
 
 from app.grading.sheet_renderer import (
-    ANSWER_CHOICES,
     BLACK,
     bubble_position_px,
     bubble_radius_px,
@@ -31,11 +30,11 @@ from app.grading.sheet_renderer import (
     render_sheet,
 )
 from app.grading.template_builder import PAGE
-from app.grading.template_schema import PageSize
+from app.grading.template_schema import ANSWER_CHOICES, PageSize
 from app.grading.template_spec import TemplateSpec
 
 STRAY_MARK_MIN_COUNT = 0
-STRAY_MARK_MAX_COUNT = 4  # exclusive upper bound
+STRAY_MARK_MAX_COUNT = 4  # lint-ignore(no-inline-comments): rng.integers() upper bound is exclusive -> sampled range is [0, 4), not [0, 4]
 STRAY_MARK_PAGE_MARGIN_MM = 15.0
 
 

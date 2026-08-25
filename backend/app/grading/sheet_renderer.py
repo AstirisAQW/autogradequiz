@@ -2,15 +2,13 @@ import cv2
 import numpy as np
 
 from app.grading.template_builder import DEFAULT_TEXT_FIELDS, FIDUCIAL_MARGIN_MM, PAGE
-from app.grading.template_schema import PageSize
+from app.grading.template_schema import ANSWER_CHOICES, FIDUCIAL_SIZE_MM, PageSize
 from app.grading.template_spec import ColumnSpecMm, TemplateSpec, TextFieldSpecMm
 
 BLACK = (0, 0, 0)
 BUBBLE_GRAY = (180, 180, 180)
 
-FIDUCIAL_SIZE_MM = 8.0
 LABEL_ROW_OFFSET_MM = 5.0
-ANSWER_CHOICES = ("A", "B", "C", "D", "E")
 BASE_HERSHEY_TOTAL_HEIGHT_PX = 27.0
 
 ROW_GROUP_SIZE = 10

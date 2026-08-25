@@ -24,9 +24,9 @@ from enum import Enum
 import cv2
 import numpy as np
 
-from app.grading.sheet_renderer import ANSWER_CHOICES, bubble_position_px, bubble_radius_px
+from app.grading.sheet_renderer import bubble_position_px, bubble_radius_px
 from app.grading.template_builder import PAGE
-from app.grading.template_schema import PageSize
+from app.grading.template_schema import ANSWER_CHOICES, PageSize
 from app.grading.template_spec import TemplateSpec
 
 
@@ -87,10 +87,15 @@ DEFAULT_THRESHOLDS = ClassifierThresholds()
 
 @dataclass(frozen=True)
 class BubbleFill:
-    """The measurement for a single bubble."""
+    """The measurement for a single bubble.
+
+    result: one of FILLED, BLANK, or AMBIGUOUS. Never MULTIPLE at this level --
+        that class only exists once fills are compared across a whole question row,
+        in QuestionFill.
+    """
 
     fill_ratio: float
-    result: BubbleResult  # FILLED, BLANK, or AMBIGUOUS -- never MULTIPLE at this level
+    result: BubbleResult
 
 
 @dataclass(frozen=True)

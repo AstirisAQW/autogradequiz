@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 
+FIDUCIAL_SIZE_MM = 8.0
+ANSWER_CHOICES = ("A", "B", "C", "D", "E")
+
 
 @dataclass(frozen=True)
 class PageSize:

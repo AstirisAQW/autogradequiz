@@ -1,6 +1,8 @@
 from app.grading.template_schema import (
+    ANSWER_CHOICES,
     AnswerColumn,
     AnswerGrid,
+    FIDUCIAL_SIZE_MM,
     PageSize,
     Point,
     Template,
@@ -9,9 +11,7 @@ from app.grading.template_schema import (
 from app.grading.template_spec import ColumnSpecMm, TemplateSpec, TextFieldSpecMm
 
 PAGE = PageSize(width_mm=210.0, height_mm=297.0, dpi=300)
-ANSWER_CHOICES = ("A", "B", "C", "D", "E")
 
-FIDUCIAL_SIZE_MM = 8.0
 FIDUCIAL_MARGIN_MM = 6.0
 BUBBLE_RADIUS_MM = 2.5
 ROW_SPACING_MM = 7.0
