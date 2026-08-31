@@ -1,4 +1,4 @@
-from app.grading.template_schema import AnswerColumn, Point, Template, TextFieldSpec
+from app.answer_sheet_templates.geometry import AnswerColumn, Point, Template, TextFieldSpec
 
 JSON_DECIMAL_PLACES = 6
 

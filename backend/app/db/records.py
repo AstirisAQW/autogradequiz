@@ -86,3 +86,4 @@ class ScanResultRecord:
     processed_image_path: str
     error_message: str
     created_at: str
+

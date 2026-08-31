@@ -234,3 +234,5 @@ def list_scan_results_needing_review() -> list[ScanResultRecord]:
             "SELECT * FROM scan_results WHERE needs_review = 1 ORDER BY created_at ASC"
         ).fetchall()
     return [_scan_result_from_row(row) for row in rows]
+
+

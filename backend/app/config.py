@@ -15,6 +15,14 @@ def default_db_path() -> str:
 
 
 class Settings(BaseSettings):
+    """Runtime configuration for the backend.
+
+    tesseract_cmd: reserved for the OCR phase, when scan_results.name_text/date_text/
+        section_text get populated from the scanned image instead of left blank. Not
+        read anywhere yet, and pytesseract (declared in pyproject.toml) isn't imported
+        anywhere yet either -- both wait on that phase's implementation.
+    """
+
     autograde_db_path: str = Field(default_factory=default_db_path)
     autograde_data_dir: str = Field(default_factory=default_data_dir)
     tesseract_cmd: str = ""
@@ -26,3 +34,4 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     return Settings()
+

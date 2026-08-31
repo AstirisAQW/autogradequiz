@@ -2,18 +2,16 @@ import json
 
 import numpy as np
 
-from app.grading.sheet_renderer import mm_to_px
-from app.grading.synthetic_sheets import (
-    STRAY_MARK_MAX_COUNT,
-    STRAY_MARK_MIN_COUNT,
-    QuestionMarkKind,
-    generate_question_plans,
-    generate_synthetic_sheet,
+from app.answer_sheet_templates.builder import PAGE
+from app.answer_sheet_templates.catalog import TWENTY_QUESTIONS
+from app.sheet_rendering.renderer import mm_to_px
+from app.synthetic_sheets.generator import generate_synthetic_sheet
+from app.synthetic_sheets.ground_truth import (
     save_ground_truth,
     synthetic_sheet_ground_truth_to_dict,
 )
-from app.grading.template_builder import PAGE
-from app.grading.template_catalog import TWENTY_QUESTIONS
+from app.synthetic_sheets.question_plan import QuestionMarkKind, generate_question_plans
+from app.synthetic_sheets.stray_marks import STRAY_MARK_MAX_COUNT, STRAY_MARK_MIN_COUNT
 
 
 def test_same_seed_is_byte_for_byte_reproducible():

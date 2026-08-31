@@ -1,14 +1,16 @@
-from app.grading.template_schema import (
+"""Converts a millimeter-based TemplateSpec into a fraction-of-page Template."""
+
+from app.answer_sheet_templates.geometry import (
     ANSWER_CHOICES,
+    FIDUCIAL_SIZE_MM,
     AnswerColumn,
     AnswerGrid,
-    FIDUCIAL_SIZE_MM,
     PageSize,
     Point,
     Template,
     TextFieldSpec,
 )
-from app.grading.template_spec import ColumnSpecMm, TemplateSpec, TextFieldSpecMm
+from app.answer_sheet_templates.layout_spec import ColumnSpecMm, TemplateSpec, TextFieldSpecMm
 
 PAGE = PageSize(width_mm=210.0, height_mm=297.0, dpi=300)
 

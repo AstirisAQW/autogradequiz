@@ -1,3 +1,7 @@
+"""The millimeter-based layout a test template is designed in, before builder.py
+converts it to the fraction-of-page geometry in geometry.py.
+"""
+
 from dataclasses import dataclass
 
 

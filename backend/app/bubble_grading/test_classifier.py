@@ -1,0 +1,119 @@
+import numpy as np
+
+from app.answer_sheet_templates.builder import PAGE
+from app.answer_sheet_templates.catalog import HUNDRED_QUESTIONS
+from app.bubble_grading.classifier import BubbleResult, QuestionOutcome, classify_sheet, score_sheet
+from app.sheet_rendering.renderer import bubble_radius_px, render_sheet
+from app.synthetic_sheets.mark_drawing import draw_marks_for_plan
+from app.synthetic_sheets.question_plan import QuestionMarkKind, generate_question_plans
+
+SEED_WITH_EVERY_MARK_KIND = 0
+"""Chosen because generate_question_plans(HUNDRED_QUESTIONS, ...) with this seed produces
+at least one question of every QuestionMarkKind, so a single sheet exercises every branch
+below."""
+
+
+def _classified_ground_truth():
+    """An aligned synthetic sheet (marks drawn, but no rotation/blur/noise/JPEG
+    simulation) plus its classification.
+
+    classify_sheet documents that it expects an already-aligned image; generate_synthetic
+    _sheet's scan-artifact simulation intentionally violates that, so comparing its output
+    against ground truth would be testing scan robustness, not classification, and the two
+    have different, separately-testable failure modes.
+    """
+    rng = np.random.default_rng(SEED_WITH_EVERY_MARK_KIND)
+    canvas = render_sheet(HUNDRED_QUESTIONS, page=PAGE)
+    radius_px = bubble_radius_px(HUNDRED_QUESTIONS, PAGE)
+
+    question_plans = generate_question_plans(HUNDRED_QUESTIONS, rng)
+    for plan in question_plans:
+        draw_marks_for_plan(canvas, HUNDRED_QUESTIONS, plan, radius_px, PAGE, rng)
+
+    question_fills = classify_sheet(canvas, HUNDRED_QUESTIONS, PAGE)
+    return question_plans, question_fills
+
+
+def test_perfect_marks_classify_as_filled_with_the_marked_choice():
+    question_plans, question_fills = _classified_ground_truth()
+
+    for plan in question_plans:
+        if plan.mark_kind == QuestionMarkKind.PERFECT:
+            fill = question_fills[plan.question_number]
+            assert fill.result == BubbleResult.FILLED
+            assert fill.marked_choices == plan.marked_choices
+
+
+def test_blank_marks_classify_as_blank():
+    question_plans, question_fills = _classified_ground_truth()
+
+    for plan in question_plans:
+        if plan.mark_kind == QuestionMarkKind.BLANK:
+            assert question_fills[plan.question_number].result == BubbleResult.BLANK
+
+
+def test_double_marks_classify_as_multiple():
+    question_plans, question_fills = _classified_ground_truth()
+
+    for plan in question_plans:
+        if plan.mark_kind == QuestionMarkKind.DOUBLE:
+            assert question_fills[plan.question_number].result == BubbleResult.MULTIPLE
+
+
+def test_incomplete_off_center_and_non_circular_marks_classify_as_filled_or_ambiguous():
+    """These defect kinds are drawn to be borderline by design, so the classifier is
+    allowed to call them either FILLED or AMBIGUOUS -- what it must never do is call a
+    non-blank, single mark BLANK or MULTIPLE."""
+    question_plans, question_fills = _classified_ground_truth()
+    borderline_kinds = {
+        QuestionMarkKind.INCOMPLETE,
+        QuestionMarkKind.OFF_CENTER,
+        QuestionMarkKind.NON_CIRCULAR,
+    }
+
+    for plan in question_plans:
+        if plan.mark_kind in borderline_kinds:
+            result = question_fills[plan.question_number].result
+            assert result in (BubbleResult.FILLED, BubbleResult.AMBIGUOUS)
+
+
+def test_light_marks_can_read_as_blank_on_small_bubble_radii():
+    """A LIGHT mark's gray fill (130-190) sometimes never clears the classifier's
+    dark_offset against a small bubble radius like HUNDRED_QUESTIONS uses, and this
+    sheet's seed reliably produces some fill_ratio == 0.0 LIGHT marks -- so BLANK is a
+    real, allowed outcome here, not just FILLED or AMBIGUOUS. This documents that
+    behavior rather than asserting a stricter guarantee the classifier doesn't make."""
+    question_plans, question_fills = _classified_ground_truth()
+
+    for plan in question_plans:
+        if plan.mark_kind == QuestionMarkKind.LIGHT:
+            result = question_fills[plan.question_number].result
+            assert result in (BubbleResult.FILLED, BubbleResult.AMBIGUOUS, BubbleResult.BLANK)
+
+
+def test_score_sheet_outcomes_cover_every_question_exactly_once():
+    question_plans, question_fills = _classified_ground_truth()
+
+    answer_key = [plan.correct_choice for plan in question_plans]
+    summary = score_sheet(question_fills, answer_key)
+
+    assert summary.graded_question_count == HUNDRED_QUESTIONS.question_count
+    assert (
+        summary.correct_count
+        + summary.wrong_count
+        + summary.blank_count
+        + summary.ambiguous_count
+        + summary.multiple_count
+        == HUNDRED_QUESTIONS.question_count
+    )
+
+
+def test_score_sheet_marks_correct_and_wrong_only_for_filled_questions():
+    question_plans, question_fills = _classified_ground_truth()
+
+    answer_key = [plan.correct_choice for plan in question_plans]
+    summary = score_sheet(question_fills, answer_key)
+
+    for question_number, outcome in summary.question_outcomes.items():
+        if outcome in (QuestionOutcome.CORRECT, QuestionOutcome.WRONG):
+            assert question_fills[question_number].result == BubbleResult.FILLED

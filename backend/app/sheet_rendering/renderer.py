@@ -1,9 +1,13 @@
+"""Draws a blank answer sheet -- fiducials, text fields, and the answer bubble grid --
+from a TemplateSpec.
+"""
+
 import cv2
 import numpy as np
 
-from app.grading.template_builder import DEFAULT_TEXT_FIELDS, FIDUCIAL_MARGIN_MM, PAGE
-from app.grading.template_schema import ANSWER_CHOICES, FIDUCIAL_SIZE_MM, PageSize
-from app.grading.template_spec import ColumnSpecMm, TemplateSpec, TextFieldSpecMm
+from app.answer_sheet_templates.builder import DEFAULT_TEXT_FIELDS, FIDUCIAL_MARGIN_MM, PAGE
+from app.answer_sheet_templates.geometry import ANSWER_CHOICES, FIDUCIAL_SIZE_MM, PageSize
+from app.answer_sheet_templates.layout_spec import ColumnSpecMm, TemplateSpec, TextFieldSpecMm
 
 BLACK = (0, 0, 0)
 BUBBLE_GRAY = (180, 180, 180)
@@ -78,7 +82,11 @@ def draw_bubble(
 
 
 def draw_column_header(
-    canvas: np.ndarray, column: ColumnSpecMm, choice_spacing_mm: float, font_size_pt: float, page: PageSize
+    canvas: np.ndarray,
+    column: ColumnSpecMm,
+    choice_spacing_mm: float,
+    font_size_pt: float,
+    page: PageSize,
 ) -> None:
     header_y_mm = column.origin_y_mm - LABEL_ROW_OFFSET_MM
     font_scale = font_pt_to_scale(font_size_pt, page)
@@ -90,7 +98,13 @@ def draw_column_header(
         text_size, _ = cv2.getTextSize(choice, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 2)
         label_x_px = choice_x_px - text_size[0] // 2
         cv2.putText(
-            canvas, choice, (label_x_px, header_y_px), cv2.FONT_HERSHEY_SIMPLEX, font_scale, BLACK, 2
+            canvas,
+            choice,
+            (label_x_px, header_y_px),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            BLACK,
+            2,
         )
 
 
@@ -99,7 +113,8 @@ def row_group_count(row_index: int) -> int:
 
 
 def row_position_mm(column: ColumnSpecMm, row_index: int, row_spacing_mm: float) -> float:
-    return column.origin_y_mm + row_index * row_spacing_mm + row_group_count(row_index) * ROW_GROUP_GAP_MM
+    row_group_offset_mm = row_group_count(row_index) * ROW_GROUP_GAP_MM
+    return column.origin_y_mm + row_index * row_spacing_mm + row_group_offset_mm
 
 
 def find_column_for_question(

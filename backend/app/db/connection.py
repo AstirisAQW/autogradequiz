@@ -26,3 +26,5 @@ def init_db() -> None:
     with get_connection() as connection:
         connection.executescript(schema_sql)
         connection.commit()
+
+

@@ -16,3 +16,5 @@ class ScanJobNotFoundError(Exception):
 class ScanResultNotFoundError(Exception):
     def __init__(self, scan_job_id: int) -> None:
         super().__init__(f"No scan result exists for scan job {scan_job_id}.")
+
+

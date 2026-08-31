@@ -1,3 +1,10 @@
+"""The fraction-of-page geometry a built Template is made of.
+
+Every position here is a fraction of the page (0.0-1.0 on each axis), not millimeters --
+see layout_spec.py for the millimeter-based specs these are built from, and builder.py
+for the conversion between the two.
+"""
+
 from dataclasses import dataclass
 
 FIDUCIAL_SIZE_MM = 8.0

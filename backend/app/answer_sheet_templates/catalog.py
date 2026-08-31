@@ -1,5 +1,7 @@
-from app.grading.exceptions import UnknownTemplateError
-from app.grading.template_spec import ColumnSpecMm, TemplateSpec
+"""The fixed set of question-count templates the app supports, keyed by template_id."""
+
+from app.answer_sheet_templates.exceptions import UnknownTemplateError
+from app.answer_sheet_templates.layout_spec import ColumnSpecMm, TemplateSpec
 
 TWENTY_QUESTIONS = TemplateSpec(
     template_id="20q_a4",

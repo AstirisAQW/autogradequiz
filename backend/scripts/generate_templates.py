@@ -2,15 +2,14 @@ import json
 from pathlib import Path
 
 import cv2
-
 from PIL import Image
 
+from app.answer_sheet_templates.builder import build_template
+from app.answer_sheet_templates.catalog import list_template_specs
+from app.answer_sheet_templates.json_export import template_to_json_dict
+from app.answer_sheet_templates.layout_spec import TemplateSpec
 from app.config import get_settings
-from app.grading.sheet_renderer import render_sheet
-from app.grading.template_builder import build_template
-from app.grading.template_catalog import list_template_specs
-from app.grading.template_json import template_to_json_dict
-from app.grading.template_spec import TemplateSpec
+from app.sheet_rendering.renderer import render_sheet
 
 
 def templates_output_dir() -> Path:
@@ -66,3 +65,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

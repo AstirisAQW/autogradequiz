@@ -33,8 +33,6 @@ CREATE TABLE IF NOT EXISTS scan_results (
     flags_json TEXT NOT NULL DEFAULT '{}',
     needs_review INTEGER NOT NULL DEFAULT 0,
     processed_image_path TEXT NOT NULL DEFAULT '',
-    -- Reserved for a later phase: no grading-failure pipeline exists yet to populate this,
-    -- so it always holds its default. See NewScanResult / ScanResultRecord in db/records.py.
     error_message TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -43,3 +41,4 @@ CREATE INDEX IF NOT EXISTS idx_batches_test_id ON batches(test_id);
 CREATE INDEX IF NOT EXISTS idx_scan_jobs_batch_id ON scan_jobs(batch_id);
 CREATE INDEX IF NOT EXISTS idx_scan_jobs_status ON scan_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_scan_results_needs_review ON scan_results(needs_review);
+

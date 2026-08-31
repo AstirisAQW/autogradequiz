@@ -131,3 +131,5 @@ def test_save_scan_result_round_trips_and_flags_for_review():
 def test_get_scan_result_raises_for_unknown_scan_job():
     with pytest.raises(ScanResultNotFoundError):
         repositories.get_scan_result(999)
+
+

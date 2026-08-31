@@ -1,6 +1,6 @@
-from app.grading.sheet_renderer import mm_to_px, render_sheet
-from app.grading.template_builder import PAGE
-from app.grading.template_catalog import HUNDRED_QUESTIONS, TWENTY_QUESTIONS
+from app.answer_sheet_templates.builder import PAGE
+from app.answer_sheet_templates.catalog import HUNDRED_QUESTIONS, TWENTY_QUESTIONS
+from app.sheet_rendering.renderer import mm_to_px, render_sheet
 
 
 def test_mm_to_px_scales_by_dpi():

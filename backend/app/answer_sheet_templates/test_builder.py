@@ -1,15 +1,15 @@
 import pytest
 
-from app.grading.exceptions import UnknownTemplateError
-from app.grading.template_builder import build_template
-from app.grading.template_catalog import (
+from app.answer_sheet_templates.builder import build_template
+from app.answer_sheet_templates.catalog import (
     FIFTY_QUESTIONS,
     HUNDRED_QUESTIONS,
     TWENTY_QUESTIONS,
     get_template_spec,
     list_template_specs,
 )
-from app.grading.template_json import template_to_json_dict
+from app.answer_sheet_templates.exceptions import UnknownTemplateError
+from app.answer_sheet_templates.json_export import template_to_json_dict
 
 
 def test_get_template_spec_returns_known_spec():

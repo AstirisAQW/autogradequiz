@@ -24,10 +24,10 @@ from enum import Enum
 import cv2
 import numpy as np
 
-from app.grading.sheet_renderer import bubble_position_px, bubble_radius_px
-from app.grading.template_builder import PAGE
-from app.grading.template_schema import ANSWER_CHOICES, PageSize
-from app.grading.template_spec import TemplateSpec
+from app.answer_sheet_templates.builder import PAGE
+from app.answer_sheet_templates.geometry import ANSWER_CHOICES, PageSize
+from app.answer_sheet_templates.layout_spec import TemplateSpec
+from app.sheet_rendering.renderer import bubble_position_px, bubble_radius_px
 
 
 class BubbleResult(Enum):
@@ -292,9 +292,9 @@ def classify_sheet(
 ) -> dict[int, QuestionFill]:
     """Classify every question on an already-aligned sheet image.
 
-    Bubble positions come from bubble_position_px, the same geometry sheet_renderer.py
-    uses to draw them, so a bubble drawn at a spot and a bubble graded at that spot are
-    always the same spot.
+    Bubble positions come from bubble_position_px, the same geometry renderer.py uses to
+    draw them, so a bubble drawn at a spot and a bubble graded at that spot are always
+    the same spot.
     """
     gray_image = to_grayscale(image)
     radius_px = bubble_radius_px(template_spec, page)
