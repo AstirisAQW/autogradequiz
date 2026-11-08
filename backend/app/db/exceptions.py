@@ -2,6 +2,10 @@ class InvalidTestError(Exception):
     pass
 
 
+class InvalidCorrectionError(Exception):
+    pass
+
+
 class TestNotFoundError(Exception):
     def __init__(self, test_id: int) -> None:
         super().__init__(f"No test exists with id {test_id}.")

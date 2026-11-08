@@ -7,6 +7,7 @@ from app.answer_sheet_templates.geometry import ANSWER_CHOICES
 from app.db.connection import get_connection
 from app.db.exceptions import (
     BatchNotFoundError,
+    InvalidCorrectionError,
     InvalidTestError,
     ScanJobNotFoundError,
     ScanResultNotFoundError,
@@ -268,5 +269,85 @@ def list_scan_results_needing_review() -> list[ScanResultRecord]:
             "SELECT * FROM scan_results WHERE needs_review = 1 ORDER BY created_at ASC"
         ).fetchall()
     return [_scan_result_from_row(row) for row in rows]
+
+
+def get_scan_corrections(scan_job_id: int) -> dict[int, str]:
+    """Return stored teacher corrections {question_number: choice} for a scan job."""
+    get_scan_job(scan_job_id)
+    with get_connection() as connection:
+        rows = connection.execute(
+            "SELECT question_number, choice FROM scan_corrections "
+            "WHERE scan_job_id = ? ORDER BY question_number ASC",
+            (scan_job_id,),
+        ).fetchall()
+    return {row["question_number"]: row["choice"] for row in rows}
+
+
+def apply_scan_corrections(scan_job_id: int, corrections: dict[int, str]) -> ScanResultRecord:
+    """Persist teacher choice corrections per question without modifying answers_json,
+    recompute the score, and clear needs_review once all flagged questions are resolved."""
+    scan_job = get_scan_job(scan_job_id)
+    result = get_scan_result(scan_job_id)
+    batch = get_batch(scan_job.batch_id)
+    test = get_test(batch.test_id)
+
+    for question_number, choice in corrections.items():
+        if not (1 <= question_number <= test.question_count):
+            raise InvalidCorrectionError(f"Question number {question_number} out of range.")
+        if choice not in ANSWER_CHOICES and choice != "":
+            raise InvalidCorrectionError(f"Invalid correction choice {choice!r}.")
+
+    with get_connection() as connection:
+        for question_number, choice in corrections.items():
+            connection.execute(
+                """
+                INSERT INTO scan_corrections (scan_job_id, question_number, choice)
+                VALUES (?, ?, ?)
+                ON CONFLICT(scan_job_id, question_number) DO UPDATE SET
+                    choice = excluded.choice
+                """,
+                (scan_job_id, question_number, choice),
+            )
+        connection.commit()
+
+    all_corrections = get_scan_corrections(scan_job_id)
+    raw_answers: list[str] = json.loads(result.answers_json)
+    flags: dict[str, list[int]] = json.loads(result.flags_json)
+    flagged = set(flags.get("ambiguous", [])) | set(flags.get("multiple", []))
+
+    correct_count = 0
+    for q_num in range(1, test.question_count + 1):
+        if q_num in all_corrections:
+            effective_choice = all_corrections[q_num]
+        elif q_num in flagged:
+            effective_choice = ""
+        else:
+            effective_choice = raw_answers[q_num - 1]
+        if effective_choice == test.answer_key[q_num - 1]:
+            correct_count += 1
+
+    unresolved = flagged - set(all_corrections.keys())
+    all_blank = all(
+        all_corrections.get(q_num, raw_answers[q_num - 1]) == ""
+        for q_num in range(1, test.question_count + 1)
+    )
+    needs_review = bool(unresolved) or (all_blank and not all_corrections)
+    new_score = (correct_count / test.question_count) * 100.0 if test.question_count else 0.0
+
+    return save_scan_result(
+        NewScanResult(
+            scan_job_id=result.scan_job_id,
+            name_text=result.name_text,
+            date_text=result.date_text,
+            section_text=result.section_text,
+            score=new_score,
+            answers_json=result.answers_json,
+            flags_json=result.flags_json,
+            needs_review=needs_review,
+            processed_image_path=result.processed_image_path,
+            error_message=result.error_message,
+        )
+    )
+
 
 

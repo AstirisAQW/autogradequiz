@@ -157,3 +157,67 @@ def test_get_scan_result_raises_for_unknown_scan_job():
         repositories.get_scan_result(999)
 
 
+def _create_flagged_scan_result(flagged_questions: list[int]) -> tuple[int, str]:
+    import json
+
+    test_record = _create_sample_test()
+    batch = repositories.create_batch(NewBatch(test_id=test_record.id))
+    scan_job = repositories.create_scan_job(
+        NewScanJob(batch_id=batch.id, raw_image_path="/data/raw/scan_1.jpg")
+    )
+    answers = list(SAMPLE_ANSWER_KEY)
+    for q_num in flagged_questions:
+        answers[q_num - 1] = "A+B"
+    answers_json = json.dumps(answers)
+    flags_json = json.dumps({"ambiguous": [], "multiple": flagged_questions})
+    initial_correct = 20 - len(flagged_questions)
+    repositories.save_scan_result(
+        NewScanResult(
+            scan_job_id=scan_job.id,
+            score=(initial_correct / 20) * 100.0,
+            answers_json=answers_json,
+            flags_json=flags_json,
+            needs_review=True,
+        )
+    )
+    return scan_job.id, answers_json
+
+
+def test_apply_scan_corrections_correct_choice_rescores_and_clears_needs_review():
+    scan_job_id, original_answers_json = _create_flagged_scan_result([1])
+
+    updated = repositories.apply_scan_corrections(scan_job_id, {1: SAMPLE_ANSWER_KEY[0]})
+
+    assert updated.answers_json == original_answers_json
+    assert updated.score == 100.0
+    assert updated.needs_review is False
+    assert repositories.get_scan_corrections(scan_job_id) == {1: SAMPLE_ANSWER_KEY[0]}
+
+
+def test_apply_scan_corrections_wrong_choice_clears_needs_review_without_adding_score():
+    scan_job_id, original_answers_json = _create_flagged_scan_result([1])
+
+    updated = repositories.apply_scan_corrections(scan_job_id, {1: "E"})
+
+    assert updated.answers_json == original_answers_json
+    assert updated.score == 95.0
+    assert updated.needs_review is False
+
+
+def test_apply_scan_corrections_partial_resolution_keeps_needs_review():
+    scan_job_id, original_answers_json = _create_flagged_scan_result([1, 2])
+
+    partial = repositories.apply_scan_corrections(scan_job_id, {1: SAMPLE_ANSWER_KEY[0]})
+
+    assert partial.answers_json == original_answers_json
+    assert partial.score == 95.0
+    assert partial.needs_review is True
+
+    resolved = repositories.apply_scan_corrections(scan_job_id, {2: "E"})
+
+    assert resolved.answers_json == original_answers_json
+    assert resolved.score == 95.0
+    assert resolved.needs_review is False
+
+
+

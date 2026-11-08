@@ -27,6 +27,10 @@ class CreateTestRequest(BaseModel):
     answer_key: list[str]
 
 
+class CorrectionsRequest(BaseModel):
+    corrections: dict[int, str]
+
+
 tests_router = APIRouter(prefix="/tests", tags=["tests"])
 batches_router = APIRouter(prefix="/batches", tags=["batches"])
 scans_router = APIRouter(prefix="/scans", tags=["scans"])
@@ -80,6 +84,13 @@ def list_batch_results_endpoint(batch_id: int) -> list[ScanResultRecord]:
 @scans_router.post("/{scan_job_id}/grade")
 def grade_scan_endpoint(scan_job_id: int) -> ScanResultRecord:
     return grade_scan_job(scan_job_id)
+
+
+@scans_router.patch("/{scan_job_id}/corrections")
+def apply_corrections_endpoint(
+    scan_job_id: int, payload: CorrectionsRequest
+) -> ScanResultRecord:
+    return repositories.apply_scan_corrections(scan_job_id, payload.corrections)
 
 
 @review_router.get("")

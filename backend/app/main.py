@@ -9,6 +9,7 @@ from app.answer_sheet_templates.exceptions import UnknownTemplateError
 from app.db.connection import init_db
 from app.db.exceptions import (
     BatchNotFoundError,
+    InvalidCorrectionError,
     InvalidTestError,
     ScanJobNotFoundError,
     ScanResultNotFoundError,
@@ -58,6 +59,7 @@ def handle_not_found(_request: Request, exc: Exception) -> JSONResponse:
 
 
 @app.exception_handler(InvalidTestError)
+@app.exception_handler(InvalidCorrectionError)
 @app.exception_handler(UnknownTemplateError)
 @app.exception_handler(ScanImageUnreadableError)
 @app.exception_handler(ScanImageSizeMismatchError)

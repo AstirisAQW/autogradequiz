@@ -37,6 +37,13 @@ CREATE TABLE IF NOT EXISTS scan_results (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS scan_corrections (
+    scan_job_id INTEGER NOT NULL REFERENCES scan_jobs(id),
+    question_number INTEGER NOT NULL,
+    choice TEXT NOT NULL,
+    PRIMARY KEY (scan_job_id, question_number)
+);
+
 CREATE INDEX IF NOT EXISTS idx_batches_test_id ON batches(test_id);
 CREATE INDEX IF NOT EXISTS idx_scan_jobs_batch_id ON scan_jobs(batch_id);
 CREATE INDEX IF NOT EXISTS idx_scan_jobs_status ON scan_jobs(status);
