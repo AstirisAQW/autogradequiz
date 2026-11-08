@@ -245,6 +245,22 @@ def get_scan_result(scan_job_id: int) -> ScanResultRecord:
     return _scan_result_from_row(row)
 
 
+def list_scan_results_for_batch(batch_id: int) -> list[ScanResultRecord]:
+    """Return every scan result belonging to a batch, oldest first."""
+    get_batch(batch_id)
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT scan_results.* FROM scan_results
+            JOIN scan_jobs ON scan_jobs.id = scan_results.scan_job_id
+            WHERE scan_jobs.batch_id = ?
+            ORDER BY scan_results.created_at ASC
+            """,
+            (batch_id,),
+        ).fetchall()
+    return [_scan_result_from_row(row) for row in rows]
+
+
 def list_scan_results_needing_review() -> list[ScanResultRecord]:
     """Return every scan result flagged for manual review, oldest first."""
     with get_connection() as connection:
