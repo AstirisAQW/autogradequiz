@@ -1,9 +1,13 @@
 import json
 import sqlite3
 
+from app.answer_sheet_templates.catalog import get_template_spec
+from app.answer_sheet_templates.exceptions import UnknownTemplateError
+from app.answer_sheet_templates.geometry import ANSWER_CHOICES
 from app.db.connection import get_connection
 from app.db.exceptions import (
     BatchNotFoundError,
+    InvalidTestError,
     ScanJobNotFoundError,
     ScanResultNotFoundError,
     TestNotFoundError,
@@ -33,6 +37,18 @@ def _test_from_row(row: sqlite3.Row) -> TestRecord:
 
 def create_test(new_test: NewTest) -> TestRecord:
     """Insert a test and its answer key, then return the stored record."""
+    try:
+        template = get_template_spec(new_test.template_id)
+    except UnknownTemplateError as exc:
+        raise InvalidTestError(str(exc)) from exc
+    if len(new_test.answer_key) != template.question_count:
+        raise InvalidTestError(
+            f"Expected {template.question_count} answers for {new_test.template_id}, "
+            f"got {len(new_test.answer_key)}."
+        )
+    if any(choice not in ANSWER_CHOICES for choice in new_test.answer_key):
+        raise InvalidTestError(f"Answer choices must be in {ANSWER_CHOICES}.")
+
     answer_key_json = json.dumps(new_test.answer_key)
     with get_connection() as connection:
         cursor = connection.execute(

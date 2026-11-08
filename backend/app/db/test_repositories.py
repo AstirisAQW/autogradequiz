@@ -4,10 +4,13 @@ from app.db import repositories
 from app.db.connection import init_db
 from app.db.exceptions import (
     BatchNotFoundError,
+    InvalidTestError,
     ScanResultNotFoundError,
     TestNotFoundError,
 )
 from app.db.records import NewBatch, NewScanJob, NewScanResult, NewTest
+
+SAMPLE_ANSWER_KEY = ["A", "B", "C", "D"] * 5
 
 
 @pytest.fixture(autouse=True)
@@ -20,15 +23,36 @@ def isolated_database(tmp_path, monkeypatch):
 
 def _create_sample_test():
     return repositories.create_test(
-        NewTest(name="Chapter 4 Quiz", template_id="20q_a4", answer_key=["A", "B", "C"])
+        NewTest(name="Chapter 4 Quiz", template_id="20q_a4", answer_key=SAMPLE_ANSWER_KEY)
     )
 
 
 def test_create_test_stores_question_count_from_answer_key():
     test_record = _create_sample_test()
 
-    assert test_record.question_count == 3
-    assert test_record.answer_key == ["A", "B", "C"]
+    assert test_record.question_count == 20
+    assert test_record.answer_key == SAMPLE_ANSWER_KEY
+
+
+def test_create_test_rejects_unknown_template():
+    with pytest.raises(InvalidTestError):
+        repositories.create_test(
+            NewTest(name="Quiz", template_id="unknown_a4", answer_key=SAMPLE_ANSWER_KEY)
+        )
+
+
+def test_create_test_rejects_wrong_answer_key_length():
+    with pytest.raises(InvalidTestError):
+        repositories.create_test(
+            NewTest(name="Quiz", template_id="20q_a4", answer_key=["A", "B", "C"])
+        )
+
+
+def test_create_test_rejects_invalid_answer_choice():
+    with pytest.raises(InvalidTestError):
+        repositories.create_test(
+            NewTest(name="Quiz", template_id="20q_a4", answer_key=["Z"] + SAMPLE_ANSWER_KEY[1:])
+        )
 
 
 def test_get_test_returns_stored_test():
