@@ -26,13 +26,15 @@ from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_s
 from app.config import get_settings
 from app.db.records import NewScanResult, ScanResultRecord
 from app.db.repositories import (
+    apply_scan_corrections,
     get_batch,
     get_scan_job,
     get_test,
+    record_scan_error,
     save_scan_result,
     update_scan_job_status,
 )
-from app.grading_pipeline.exceptions import ScanImageUnreadableError
+from app.grading_pipeline.exceptions import ScanImageUnreadableError, ScanJobAlreadyGradedError
 from app.scan_alignment.align_scan import align_scan
 from app.sheet_rendering.renderer import mm_to_px
 
@@ -89,10 +91,12 @@ def read_text_fields(image: np.ndarray, page: PageSize = PAGE) -> dict[str, str]
     return values
 
 
-def grade_scan_job(scan_job_id: int) -> ScanResultRecord:
+def grade_scan_job(scan_job_id: int, force: bool = False) -> ScanResultRecord:
     """Run one scan job through classification and scoring, store the result, and mark
     the scan job done."""
     scan_job = get_scan_job(scan_job_id)
+    if scan_job.status == "done" and not force:
+        raise ScanJobAlreadyGradedError(scan_job_id)
     try:
         batch = get_batch(scan_job.batch_id)
         test = get_test(batch.test_id)
@@ -109,7 +113,7 @@ def grade_scan_job(scan_job_id: int) -> ScanResultRecord:
         score_summary = score_sheet(question_fills, test.answer_key)
         text_fields = read_text_fields(aligned_image)
 
-        scan_result = save_scan_result(
+        save_scan_result(
             NewScanResult(
                 scan_job_id=scan_job.id,
                 name_text=text_fields.get("name", ""),
@@ -122,9 +126,10 @@ def grade_scan_job(scan_job_id: int) -> ScanResultRecord:
                 processed_image_path=processed_image_path,
             )
         )
+        scan_result = apply_scan_corrections(scan_job.id, {})
         update_scan_job_status(scan_job.id, "done")
         return scan_result
     except Exception as exc:
-        save_scan_result(NewScanResult(scan_job_id=scan_job.id, error_message=str(exc)))
+        record_scan_error(scan_job.id, str(exc))
         update_scan_job_status(scan_job.id, "failed")
         raise

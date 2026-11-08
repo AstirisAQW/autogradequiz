@@ -9,7 +9,7 @@ from app.bubble_grading.classifier import classify_sheet
 from app.db import repositories
 from app.db.connection import init_db
 from app.db.records import NewBatch, NewScanJob, NewTest
-from app.grading_pipeline.exceptions import ScanImageUnreadableError
+from app.grading_pipeline.exceptions import ScanImageUnreadableError, ScanJobAlreadyGradedError
 from app.grading_pipeline.grade_scan_job import grade_scan_job, scan_job_needs_review
 from app.scan_alignment.align_scan import ScanAlignmentError
 from app.sheet_rendering.renderer import blank_canvas, bubble_radius_px, mm_to_px, render_sheet
@@ -272,3 +272,41 @@ def test_grade_scan_job_succeeds_when_ocr_raises(tmp_path, monkeypatch):
 
     assert repositories.get_scan_job(scan_job.id).status == "done"
     assert (result.name_text, result.date_text, result.section_text) == ("", "", "")
+
+
+def test_grade_scan_job_correct_then_forced_regrade_keeps_100(tmp_path):
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1)
+    scan_job = _create_scan_job(tmp_path, sheet)
+
+    grade_scan_job(scan_job.id)
+    with pytest.raises(ScanJobAlreadyGradedError):
+        grade_scan_job(scan_job.id)
+
+    corrections = {i + 1: choice for i, choice in enumerate(sheet.answer_key)}
+    corrected = repositories.apply_scan_corrections(scan_job.id, corrections)
+    assert corrected.score == 100.0
+
+    regraded = grade_scan_job(scan_job.id, force=True)
+    assert regraded.score == 100.0
+    assert regraded.needs_review is False
+
+
+def test_grade_scan_job_failed_regrade_leaves_good_result_intact(tmp_path):
+    from pathlib import Path
+
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1)
+    scan_job = _create_scan_job(tmp_path, sheet)
+    good_result = grade_scan_job(scan_job.id)
+
+    Path(scan_job.raw_image_path).unlink()
+    with pytest.raises(ScanImageUnreadableError) as exc_info:
+        grade_scan_job(scan_job.id, force=True)
+
+    after = repositories.get_scan_result(scan_job.id)
+    assert after.score == good_result.score
+    assert after.answers_json == good_result.answers_json
+    assert after.flags_json == good_result.flags_json
+    assert after.needs_review == good_result.needs_review
+    assert after.processed_image_path == good_result.processed_image_path
+    assert after.error_message == str(exc_info.value)
+

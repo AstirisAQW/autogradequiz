@@ -123,8 +123,8 @@ def export_batch_csv_endpoint(batch_id: int) -> Response:
 
 
 @scans_router.post("/{scan_job_id}/grade")
-def grade_scan_endpoint(scan_job_id: int) -> ScanResultRecord:
-    return grade_scan_job(scan_job_id)
+def grade_scan_endpoint(scan_job_id: int, force: bool = False) -> ScanResultRecord:
+    return grade_scan_job(scan_job_id, force=force)
 
 
 @scans_router.patch("/{scan_job_id}/corrections")

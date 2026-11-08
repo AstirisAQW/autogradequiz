@@ -15,7 +15,11 @@ from app.db.exceptions import (
     ScanResultNotFoundError,
     TestNotFoundError,
 )
-from app.grading_pipeline.exceptions import ScanImageSizeMismatchError, ScanImageUnreadableError
+from app.grading_pipeline.exceptions import (
+    ScanImageSizeMismatchError,
+    ScanImageUnreadableError,
+    ScanJobAlreadyGradedError,
+)
 from app.routers import batches_router, review_router, scans_router, tests_router
 from app.scan_alignment.align_scan import ScanAlignmentError
 
@@ -56,6 +60,11 @@ app.add_middleware(
 @app.exception_handler(ScanResultNotFoundError)
 def handle_not_found(_request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@app.exception_handler(ScanJobAlreadyGradedError)
+def handle_conflict(_request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @app.exception_handler(InvalidTestError)

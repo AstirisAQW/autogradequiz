@@ -161,6 +161,8 @@ def test_full_grading_and_review_workflow_over_http():
     assert graded["scan_job_id"] == scan_job_id
     assert graded["needs_review"] is True
 
+    assert client.post(f"/scans/{scan_job_id}/grade").status_code == 409
+
     results_resp = client.get(f"/batches/{batch_id}/results")
     assert results_resp.status_code == 200
     assert [r["id"] for r in results_resp.json()] == [graded["id"]]

@@ -235,6 +235,23 @@ def save_scan_result(new_scan_result: NewScanResult) -> ScanResultRecord:
     return get_scan_result(new_scan_result.scan_job_id)
 
 
+def record_scan_error(scan_job_id: int, error_message: str) -> ScanResultRecord:
+    """Store an error message on scan_results without overwriting existing graded fields."""
+    get_scan_job(scan_job_id)
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO scan_results (scan_job_id, error_message)
+            VALUES (?, ?)
+            ON CONFLICT(scan_job_id) DO UPDATE SET
+                error_message = excluded.error_message
+            """,
+            (scan_job_id, error_message),
+        )
+        connection.commit()
+    return get_scan_result(scan_job_id)
+
+
 def get_scan_result(scan_job_id: int) -> ScanResultRecord:
     """Return the result for one scan job, or raise ScanResultNotFoundError."""
     with get_connection() as connection:
