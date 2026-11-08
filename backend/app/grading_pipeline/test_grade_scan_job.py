@@ -9,12 +9,17 @@ from app.bubble_grading.classifier import classify_sheet
 from app.db import repositories
 from app.db.connection import init_db
 from app.db.records import NewBatch, NewScanJob, NewTest
-from app.grading_pipeline.exceptions import ScanImageSizeMismatchError, ScanImageUnreadableError
+from app.grading_pipeline.exceptions import ScanImageUnreadableError
 from app.grading_pipeline.grade_scan_job import grade_scan_job, scan_job_needs_review
-from app.sheet_rendering.renderer import bubble_radius_px, render_sheet
+from app.scan_alignment.align_scan import ScanAlignmentError
+from app.sheet_rendering.renderer import blank_canvas, bubble_radius_px, render_sheet
 from app.synthetic_sheets.generator import generate_synthetic_sheet
 from app.synthetic_sheets.mark_drawing import draw_marks_for_plan
 from app.synthetic_sheets.question_plan import generate_answer_key, generate_question_plans
+from app.synthetic_sheets.scan_artifacts import (
+    apply_gaussian_blur,
+    apply_rotation_and_perspective,
+)
 
 
 def _aligned_image_against_key(template_spec, seed, answer_key):
@@ -104,17 +109,53 @@ def test_grade_scan_job_raises_for_an_unreadable_image(tmp_path):
     assert repositories.get_scan_result(scan_job.id).error_message == str(exc_info.value)
 
 
-def test_grade_scan_job_fails_for_half_size_image(tmp_path):
+def test_grade_scan_job_fails_when_fiducials_are_missing(tmp_path):
     sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1)
-    half_image = cv2.resize(sheet.image, (sheet.image.shape[1] // 2, sheet.image.shape[0] // 2))
-    image_path = tmp_path / "half.png"
-    cv2.imwrite(str(image_path), half_image)
+    image_path = tmp_path / "no_fiducials.png"
+    cv2.imwrite(str(image_path), blank_canvas(PAGE))
     scan_job = _create_scan_job(tmp_path, sheet, image_path=image_path)
 
-    with pytest.raises(ScanImageSizeMismatchError):
+    with pytest.raises(ScanAlignmentError):
         grade_scan_job(scan_job.id)
 
     assert repositories.get_scan_job(scan_job.id).status == "failed"
+
+
+def test_grade_scan_job_aligns_distorted_sheet_and_saves_processed_image(tmp_path):
+    from pathlib import Path
+
+    key_rng = np.random.default_rng(19)
+    answer_key = generate_answer_key(TWENTY_QUESTIONS.question_count, key_rng)
+    baseline_image = _aligned_image_against_key(TWENTY_QUESTIONS, seed=7, answer_key=answer_key)
+
+    artifact_rng = np.random.default_rng(23)
+    distorted = apply_rotation_and_perspective(baseline_image, artifact_rng)
+    distorted = apply_gaussian_blur(distorted, artifact_rng)
+
+    test_record = repositories.create_test(
+        NewTest(name="Quiz", template_id=TWENTY_QUESTIONS.template_id, answer_key=answer_key)
+    )
+    batch = repositories.create_batch(NewBatch(test_id=test_record.id))
+
+    baseline_path = tmp_path / "baseline.png"
+    cv2.imwrite(str(baseline_path), baseline_image)
+    baseline_job = repositories.create_scan_job(
+        NewScanJob(batch_id=batch.id, raw_image_path=str(baseline_path))
+    )
+
+    distorted_path = tmp_path / "distorted.png"
+    cv2.imwrite(str(distorted_path), distorted)
+    distorted_job = repositories.create_scan_job(
+        NewScanJob(batch_id=batch.id, raw_image_path=str(distorted_path))
+    )
+
+    baseline_result = grade_scan_job(baseline_job.id)
+    distorted_result = grade_scan_job(distorted_job.id)
+
+    assert distorted_result.answers_json == baseline_result.answers_json
+    assert distorted_result.score == baseline_result.score
+    assert distorted_result.processed_image_path != str(distorted_path)
+    assert Path(distorted_result.processed_image_path).exists()
 
 
 def test_grade_scan_job_flags_blank_and_180_rotated_sheets_for_review(tmp_path):

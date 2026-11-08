@@ -13,13 +13,14 @@ OCR phase config.tesseract_cmd is reserved for, which hasn't been built yet eith
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import cv2
 import numpy as np
 
-from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import get_template_spec
 from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_sheet, score_sheet
+from app.config import get_settings
 from app.db.records import NewScanResult, ScanResultRecord
 from app.db.repositories import (
     get_batch,
@@ -28,8 +29,8 @@ from app.db.repositories import (
     save_scan_result,
     update_scan_job_status,
 )
-from app.grading_pipeline.exceptions import ScanImageSizeMismatchError, ScanImageUnreadableError
-from app.sheet_rendering.renderer import mm_to_px
+from app.grading_pipeline.exceptions import ScanImageUnreadableError
+from app.scan_alignment.align_scan import align_scan
 
 
 def load_scan_image(raw_image_path: str) -> np.ndarray:
@@ -78,12 +79,13 @@ def grade_scan_job(scan_job_id: int) -> ScanResultRecord:
         template_spec = get_template_spec(test.template_id)
 
         image = load_scan_image(scan_job.raw_image_path)
-        # shortcut: requires exact template pixel dimensions, replace when fiducial alignment lands
-        expected_size = mm_to_px(PAGE.width_mm, PAGE.height_mm, PAGE)
-        actual_size = (image.shape[1], image.shape[0])
-        if actual_size != expected_size:
-            raise ScanImageSizeMismatchError(actual_size, expected_size)
-        question_fills = classify_sheet(image, template_spec)
+        aligned_image = align_scan(image, template_spec)
+        processed_dir = Path(get_settings().autograde_data_dir) / "processed"
+        processed_dir.mkdir(parents=True, exist_ok=True)
+        processed_image_path = str(processed_dir / f"scan_{scan_job.id}.png")
+        cv2.imwrite(processed_image_path, aligned_image)
+
+        question_fills = classify_sheet(aligned_image, template_spec)
         score_summary = score_sheet(question_fills, test.answer_key)
 
         scan_result = save_scan_result(
@@ -96,7 +98,7 @@ def grade_scan_job(scan_job_id: int) -> ScanResultRecord:
                 answers_json=question_fills_to_answers_json(question_fills),
                 flags_json=question_fills_to_flags_json(question_fills),
                 needs_review=scan_job_needs_review(question_fills),
-                processed_image_path=scan_job.raw_image_path,
+                processed_image_path=processed_image_path,
             )
         )
         update_scan_job_status(scan_job.id, "done")
