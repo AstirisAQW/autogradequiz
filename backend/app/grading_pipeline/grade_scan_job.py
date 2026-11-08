@@ -17,8 +17,11 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pytesseract
 
+from app.answer_sheet_templates.builder import DEFAULT_TEXT_FIELDS, PAGE
 from app.answer_sheet_templates.catalog import get_template_spec
+from app.answer_sheet_templates.geometry import PageSize
 from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_sheet, score_sheet
 from app.config import get_settings
 from app.db.records import NewScanResult, ScanResultRecord
@@ -31,6 +34,7 @@ from app.db.repositories import (
 )
 from app.grading_pipeline.exceptions import ScanImageUnreadableError
 from app.scan_alignment.align_scan import align_scan
+from app.sheet_rendering.renderer import mm_to_px
 
 
 def load_scan_image(raw_image_path: str) -> np.ndarray:
@@ -69,6 +73,22 @@ def scan_job_needs_review(question_fills: dict[int, QuestionFill]) -> bool:
     ) or all(fill.result == BubbleResult.BLANK for fill in question_fills.values())
 
 
+def read_text_fields(image: np.ndarray, page: PageSize = PAGE) -> dict[str, str]:
+    settings = get_settings()
+    if settings.tesseract_cmd:
+        pytesseract.pytesseract.tesseract_cmd = settings.tesseract_cmd
+    values: dict[str, str] = {}
+    for field in DEFAULT_TEXT_FIELDS:
+        x0, y0 = mm_to_px(field.x_mm, field.y_mm, page)
+        x1, y1 = mm_to_px(field.x_mm + field.width_mm, field.y_mm + field.height_mm, page)
+        crop = image[y0 + 4 : y1 - 4, x0 + 4 : x1 - 4]
+        try:
+            values[field.id] = pytesseract.image_to_string(crop, config="--psm 7").strip()
+        except Exception:
+            values[field.id] = ""
+    return values
+
+
 def grade_scan_job(scan_job_id: int) -> ScanResultRecord:
     """Run one scan job through classification and scoring, store the result, and mark
     the scan job done."""
@@ -87,13 +107,14 @@ def grade_scan_job(scan_job_id: int) -> ScanResultRecord:
 
         question_fills = classify_sheet(aligned_image, template_spec)
         score_summary = score_sheet(question_fills, test.answer_key)
+        text_fields = read_text_fields(aligned_image)
 
         scan_result = save_scan_result(
             NewScanResult(
                 scan_job_id=scan_job.id,
-                name_text="",
-                date_text="",
-                section_text="",
+                name_text=text_fields.get("name", ""),
+                date_text=text_fields.get("date", ""),
+                section_text=text_fields.get("section", ""),
                 score=score_summary.score_fraction * 100,
                 answers_json=question_fills_to_answers_json(question_fills),
                 flags_json=question_fills_to_flags_json(question_fills),

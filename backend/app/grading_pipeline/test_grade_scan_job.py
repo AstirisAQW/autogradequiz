@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import pytest
 
-from app.answer_sheet_templates.builder import PAGE
+from app.answer_sheet_templates.builder import DEFAULT_TEXT_FIELDS, PAGE
 from app.answer_sheet_templates.catalog import TWENTY_QUESTIONS
 from app.answer_sheet_templates.geometry import ANSWER_CHOICES
 from app.bubble_grading.classifier import classify_sheet
@@ -12,7 +12,7 @@ from app.db.records import NewBatch, NewScanJob, NewTest
 from app.grading_pipeline.exceptions import ScanImageUnreadableError
 from app.grading_pipeline.grade_scan_job import grade_scan_job, scan_job_needs_review
 from app.scan_alignment.align_scan import ScanAlignmentError
-from app.sheet_rendering.renderer import blank_canvas, bubble_radius_px, render_sheet
+from app.sheet_rendering.renderer import blank_canvas, bubble_radius_px, mm_to_px, render_sheet
 from app.synthetic_sheets.generator import generate_synthetic_sheet
 from app.synthetic_sheets.mark_drawing import draw_marks_for_plan
 from app.synthetic_sheets.question_plan import generate_answer_key, generate_question_plans
@@ -228,3 +228,47 @@ def test_grade_scan_job_scores_against_the_tests_key_not_the_sheets_own(tmp_path
     disagreeing_result = _grade_against(disagreeing_key)
 
     assert matching_result.score != disagreeing_result.score
+
+
+def test_grade_scan_job_reads_text_fields_with_ocr(tmp_path):
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1)
+    canvas = _aligned_image_against_key(TWENTY_QUESTIONS, seed=3, answer_key=sheet.answer_key)
+    expected = {"name": "JORDAN LEE", "date": "2026-11-08", "section": "SEC 3B"}
+    for field in DEFAULT_TEXT_FIELDS:
+        x0, y0 = mm_to_px(field.x_mm, field.y_mm, PAGE)
+        _, y1 = mm_to_px(field.x_mm + field.width_mm, field.y_mm + field.height_mm, PAGE)
+        cv2.putText(
+            canvas,
+            expected[field.id],
+            (x0 + 20, y1 - 25),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.2,
+            (0, 0, 0),
+            3,
+        )
+
+    image_path = tmp_path / "ocr.png"
+    cv2.imwrite(str(image_path), canvas)
+    scan_job = _create_scan_job(tmp_path, sheet, image_path=image_path)
+
+    result = grade_scan_job(scan_job.id)
+
+    assert result.name_text == "JORDAN LEE"
+    assert result.date_text == "2026-11-08"
+    assert result.section_text == "SEC 3B"
+
+
+def test_grade_scan_job_succeeds_when_ocr_raises(tmp_path, monkeypatch):
+    import pytesseract
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("Tesseract missing")
+
+    monkeypatch.setattr(pytesseract, "image_to_string", _boom)
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1)
+    scan_job = _create_scan_job(tmp_path, sheet)
+
+    result = grade_scan_job(scan_job.id)
+
+    assert repositories.get_scan_job(scan_job.id).status == "done"
+    assert (result.name_text, result.date_text, result.section_text) == ("", "", "")
