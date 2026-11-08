@@ -9,7 +9,7 @@ from app.bubble_grading.classifier import classify_sheet
 from app.db import repositories
 from app.db.connection import init_db
 from app.db.records import NewBatch, NewScanJob, NewTest
-from app.grading_pipeline.exceptions import ScanImageUnreadableError
+from app.grading_pipeline.exceptions import ScanImageSizeMismatchError, ScanImageUnreadableError
 from app.grading_pipeline.grade_scan_job import grade_scan_job, scan_job_needs_review
 from app.sheet_rendering.renderer import bubble_radius_px, render_sheet
 from app.synthetic_sheets.generator import generate_synthetic_sheet
@@ -102,6 +102,34 @@ def test_grade_scan_job_raises_for_an_unreadable_image(tmp_path):
     assert repositories.get_scan_job(scan_job.id).status == "failed"
     assert repositories.list_pending_scan_jobs() == []
     assert repositories.get_scan_result(scan_job.id).error_message == str(exc_info.value)
+
+
+def test_grade_scan_job_fails_for_half_size_image(tmp_path):
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1)
+    half_image = cv2.resize(sheet.image, (sheet.image.shape[1] // 2, sheet.image.shape[0] // 2))
+    image_path = tmp_path / "half.png"
+    cv2.imwrite(str(image_path), half_image)
+    scan_job = _create_scan_job(tmp_path, sheet, image_path=image_path)
+
+    with pytest.raises(ScanImageSizeMismatchError):
+        grade_scan_job(scan_job.id)
+
+    assert repositories.get_scan_job(scan_job.id).status == "failed"
+
+
+def test_grade_scan_job_flags_blank_and_180_rotated_sheets_for_review(tmp_path):
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1)
+
+    blank_path = tmp_path / "blank.png"
+    cv2.imwrite(str(blank_path), render_sheet(TWENTY_QUESTIONS, page=PAGE))
+    blank_job = _create_scan_job(tmp_path, sheet, image_path=blank_path)
+
+    rotated_path = tmp_path / "rotated.png"
+    cv2.imwrite(str(rotated_path), cv2.rotate(sheet.image, cv2.ROTATE_180))
+    rotated_job = _create_scan_job(tmp_path, sheet, image_path=rotated_path)
+
+    assert grade_scan_job(blank_job.id).needs_review is True
+    assert grade_scan_job(rotated_job.id).needs_review is True
 
 
 def test_grade_scan_job_grades_a_batch_of_sheets_against_one_shared_key(tmp_path):

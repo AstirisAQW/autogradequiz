@@ -17,6 +17,7 @@ import json
 import cv2
 import numpy as np
 
+from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import get_template_spec
 from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_sheet, score_sheet
 from app.db.records import NewScanResult, ScanResultRecord
@@ -27,7 +28,8 @@ from app.db.repositories import (
     save_scan_result,
     update_scan_job_status,
 )
-from app.grading_pipeline.exceptions import ScanImageUnreadableError
+from app.grading_pipeline.exceptions import ScanImageSizeMismatchError, ScanImageUnreadableError
+from app.sheet_rendering.renderer import mm_to_px
 
 
 def load_scan_image(raw_image_path: str) -> np.ndarray:
@@ -63,7 +65,7 @@ def scan_job_needs_review(question_fills: dict[int, QuestionFill]) -> bool:
     return any(
         fill.result in (BubbleResult.AMBIGUOUS, BubbleResult.MULTIPLE)
         for fill in question_fills.values()
-    )
+    ) or all(fill.result == BubbleResult.BLANK for fill in question_fills.values())
 
 
 def grade_scan_job(scan_job_id: int) -> ScanResultRecord:
@@ -76,6 +78,11 @@ def grade_scan_job(scan_job_id: int) -> ScanResultRecord:
         template_spec = get_template_spec(test.template_id)
 
         image = load_scan_image(scan_job.raw_image_path)
+        # shortcut: requires exact template pixel dimensions, replace when fiducial alignment lands
+        expected_size = mm_to_px(PAGE.width_mm, PAGE.height_mm, PAGE)
+        actual_size = (image.shape[1], image.shape[0])
+        if actual_size != expected_size:
+            raise ScanImageSizeMismatchError(actual_size, expected_size)
         question_fills = classify_sheet(image, template_spec)
         score_summary = score_sheet(question_fills, test.answer_key)
 
