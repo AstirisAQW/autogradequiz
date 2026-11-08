@@ -42,3 +42,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# data
+data/autograde.db
+data/synthetic_sheets/
+/backend/data/autograde.db
+/backend/data/synthetic_sheets/
+!/backend/data/templates/
+!data/templates/
+
