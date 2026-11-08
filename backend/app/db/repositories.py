@@ -203,9 +203,9 @@ def save_scan_result(new_scan_result: NewScanResult) -> ScanResultRecord:
             """
             INSERT INTO scan_results (
                 scan_job_id, name_text, date_text, section_text, score,
-                answers_json, flags_json, needs_review, processed_image_path
+                answers_json, flags_json, needs_review, processed_image_path, error_message
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(scan_job_id) DO UPDATE SET
                 name_text = excluded.name_text,
                 date_text = excluded.date_text,
@@ -214,7 +214,8 @@ def save_scan_result(new_scan_result: NewScanResult) -> ScanResultRecord:
                 answers_json = excluded.answers_json,
                 flags_json = excluded.flags_json,
                 needs_review = excluded.needs_review,
-                processed_image_path = excluded.processed_image_path
+                processed_image_path = excluded.processed_image_path,
+                error_message = excluded.error_message
             """,
             (
                 new_scan_result.scan_job_id,
@@ -226,6 +227,7 @@ def save_scan_result(new_scan_result: NewScanResult) -> ScanResultRecord:
                 new_scan_result.flags_json,
                 int(new_scan_result.needs_review),
                 new_scan_result.processed_image_path,
+                new_scan_result.error_message,
             ),
         )
         connection.commit()

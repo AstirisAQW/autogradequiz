@@ -96,8 +96,12 @@ def test_grade_scan_job_raises_for_an_unreadable_image(tmp_path):
     sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1)
     scan_job = _create_scan_job(tmp_path, sheet, image_path=tmp_path / "missing.png")
 
-    with pytest.raises(ScanImageUnreadableError):
+    with pytest.raises(ScanImageUnreadableError) as exc_info:
         grade_scan_job(scan_job.id)
+
+    assert repositories.get_scan_job(scan_job.id).status == "failed"
+    assert repositories.list_pending_scan_jobs() == []
+    assert repositories.get_scan_result(scan_job.id).error_message == str(exc_info.value)
 
 
 def test_grade_scan_job_grades_a_batch_of_sheets_against_one_shared_key(tmp_path):

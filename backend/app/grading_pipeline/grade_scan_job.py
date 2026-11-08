@@ -70,26 +70,31 @@ def grade_scan_job(scan_job_id: int) -> ScanResultRecord:
     """Run one scan job through classification and scoring, store the result, and mark
     the scan job done."""
     scan_job = get_scan_job(scan_job_id)
-    batch = get_batch(scan_job.batch_id)
-    test = get_test(batch.test_id)
-    template_spec = get_template_spec(test.template_id)
+    try:
+        batch = get_batch(scan_job.batch_id)
+        test = get_test(batch.test_id)
+        template_spec = get_template_spec(test.template_id)
 
-    image = load_scan_image(scan_job.raw_image_path)
-    question_fills = classify_sheet(image, template_spec)
-    score_summary = score_sheet(question_fills, test.answer_key)
+        image = load_scan_image(scan_job.raw_image_path)
+        question_fills = classify_sheet(image, template_spec)
+        score_summary = score_sheet(question_fills, test.answer_key)
 
-    scan_result = save_scan_result(
-        NewScanResult(
-            scan_job_id=scan_job.id,
-            name_text="",
-            date_text="",
-            section_text="",
-            score=score_summary.score_fraction * 100,
-            answers_json=question_fills_to_answers_json(question_fills),
-            flags_json=question_fills_to_flags_json(question_fills),
-            needs_review=scan_job_needs_review(question_fills),
-            processed_image_path=scan_job.raw_image_path,
+        scan_result = save_scan_result(
+            NewScanResult(
+                scan_job_id=scan_job.id,
+                name_text="",
+                date_text="",
+                section_text="",
+                score=score_summary.score_fraction * 100,
+                answers_json=question_fills_to_answers_json(question_fills),
+                flags_json=question_fills_to_flags_json(question_fills),
+                needs_review=scan_job_needs_review(question_fills),
+                processed_image_path=scan_job.raw_image_path,
+            )
         )
-    )
-    update_scan_job_status(scan_job.id, "done")
-    return scan_result
+        update_scan_job_status(scan_job.id, "done")
+        return scan_result
+    except Exception as exc:
+        save_scan_result(NewScanResult(scan_job_id=scan_job.id, error_message=str(exc)))
+        update_scan_job_status(scan_job.id, "failed")
+        raise
