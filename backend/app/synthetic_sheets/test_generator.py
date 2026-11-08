@@ -10,7 +10,11 @@ from app.synthetic_sheets.ground_truth import (
     save_ground_truth,
     synthetic_sheet_ground_truth_to_dict,
 )
-from app.synthetic_sheets.question_plan import QuestionMarkKind, generate_question_plans
+from app.synthetic_sheets.question_plan import (
+    QuestionMarkKind,
+    generate_answer_key,
+    generate_question_plans,
+)
 from app.synthetic_sheets.stray_marks import STRAY_MARK_MAX_COUNT, STRAY_MARK_MIN_COUNT
 
 
@@ -69,6 +73,34 @@ def test_answer_key_has_one_entry_per_question():
 
     assert len(sheet.answer_key) == TWENTY_QUESTIONS.question_count
     assert all(choice in ("A", "B", "C", "D", "E") for choice in sheet.answer_key)
+
+
+def test_generate_synthetic_sheet_grades_against_a_supplied_answer_key():
+    rng = np.random.default_rng(500)
+    answer_key = generate_answer_key(TWENTY_QUESTIONS.question_count, rng)
+
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1, answer_key=answer_key)
+
+    assert sheet.answer_key == answer_key
+
+
+def test_one_answer_key_can_be_shared_across_a_batch_of_sheets():
+    """The real-world shape this exists for: one test has one answer key, graded
+    against many different students' sheets."""
+    rng = np.random.default_rng(500)
+    answer_key = generate_answer_key(TWENTY_QUESTIONS.question_count, rng)
+
+    sheets = [
+        generate_synthetic_sheet(TWENTY_QUESTIONS, seed=seed, answer_key=answer_key)
+        for seed in range(4)
+    ]
+
+    for sheet in sheets:
+        assert sheet.answer_key == answer_key
+    marked_choices_by_sheet = [
+        [plan.marked_choices for plan in sheet.question_plans] for sheet in sheets
+    ]
+    assert len({tuple(choices) for choices in marked_choices_by_sheet}) > 1
 
 
 def test_save_ground_truth_writes_seed_and_answers_not_pixels(tmp_path):

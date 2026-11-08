@@ -43,7 +43,10 @@ class SyntheticSheet:
 
 
 def generate_synthetic_sheet(
-    template_spec: TemplateSpec, seed: int, page: PageSize = PAGE
+    template_spec: TemplateSpec,
+    seed: int,
+    page: PageSize = PAGE,
+    answer_key: list[str] | None = None,
 ) -> SyntheticSheet:
     """Render one fully reproducible synthetic sheet for the given seed.
 
@@ -51,13 +54,17 @@ def generate_synthetic_sheet(
     stray marks appear and where, and every scan/photo distortion parameter -- is drawn
     from a single Generator seeded here, so the same (template_spec, seed) pair always
     produces the same image.
+
+    answer_key, when given, is graded against instead of each question inventing its own
+    correct choice -- pass the same key to several seeds to simulate a batch of different
+    student sheets all taking the same test.
     """
     rng = np.random.default_rng(seed)
 
     canvas = render_sheet(template_spec, page=page)
     radius_px = bubble_radius_px(template_spec, page)
 
-    question_plans = generate_question_plans(template_spec, rng)
+    question_plans = generate_question_plans(template_spec, rng, answer_key=answer_key)
     for plan in question_plans:
         draw_marks_for_plan(canvas, template_spec, plan, radius_px, page, rng)
 

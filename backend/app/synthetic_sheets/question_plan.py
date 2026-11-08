@@ -51,15 +51,34 @@ class QuestionPlan:
     mark_kind: QuestionMarkKind
 
 
+def generate_answer_key(question_count: int, rng: np.random.Generator) -> list[str]:
+    """An answer key independent of any one sheet's marks: as in real usage, where a
+    test's answer key is set once and graded against many different student sheets, not
+    invented fresh per sheet.
+    """
+    return [str(choice) for choice in rng.choice(ANSWER_CHOICES, size=question_count)]
+
+
 def generate_question_plans(
-    template_spec: TemplateSpec, rng: np.random.Generator
+    template_spec: TemplateSpec,
+    rng: np.random.Generator,
+    answer_key: list[str] | None = None,
 ) -> tuple[QuestionPlan, ...]:
+    """Ground truth for every question on one sheet.
+
+    answer_key, when given, fixes each question's correct_choice instead of drawing it
+    from rng -- so the same key can be graded against many independently-generated
+    sheets, the way one real test's answer key is graded against a batch of scans.
+    """
     kinds = [kind for kind, _ in QUESTION_MARK_WEIGHTS]
     weights = [weight for _, weight in QUESTION_MARK_WEIGHTS]
 
     plans = []
     for question_number in range(1, template_spec.question_count + 1):
-        correct_choice = str(rng.choice(ANSWER_CHOICES))
+        if answer_key is not None:
+            correct_choice = answer_key[question_number - 1]
+        else:
+            correct_choice = str(rng.choice(ANSWER_CHOICES))
         mark_kind = rng.choice(kinds, p=weights)
 
         if mark_kind == QuestionMarkKind.BLANK:
