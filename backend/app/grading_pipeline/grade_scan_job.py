@@ -81,7 +81,7 @@ def read_text_fields(image: np.ndarray, page: PageSize = PAGE) -> dict[str, str]
     for field in DEFAULT_TEXT_FIELDS:
         x0, y0 = mm_to_px(field.x_mm, field.y_mm, page)
         x1, y1 = mm_to_px(field.x_mm + field.width_mm, field.y_mm + field.height_mm, page)
-        crop = image[y0 + 4 : y1 - 4, x0 + 4 : x1 - 4]
+        crop = image[y0 + 8 : y1 - 8, x0 + 8 : x1 - 8]
         try:
             values[field.id] = pytesseract.image_to_string(crop, config="--psm 7").strip()
         except Exception:

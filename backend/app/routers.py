@@ -1,7 +1,10 @@
+import csv
+import io
+import json
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 from app.config import get_settings
@@ -79,6 +82,44 @@ async def upload_scan_endpoint(batch_id: int, file: UploadFile = File(...)) -> S
 @batches_router.get("/{batch_id}/results")
 def list_batch_results_endpoint(batch_id: int) -> list[ScanResultRecord]:
     return repositories.list_scan_results_for_batch(batch_id)
+
+
+@batches_router.get("/{batch_id}/export.csv")
+def export_batch_csv_endpoint(batch_id: int) -> Response:
+    batch = repositories.get_batch(batch_id)
+    test = repositories.get_test(batch.test_id)
+    results = repositories.list_scan_results_for_batch(batch_id)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        [
+            "name",
+            "date",
+            "section",
+            "score",
+            "needs_review",
+            *(f"q{i}" for i in range(1, test.question_count + 1)),
+        ]
+    )
+    for result in results:
+        raw_answers = json.loads(result.answers_json)
+        corrections = repositories.get_scan_corrections(result.scan_job_id)
+        answers = [
+            corrections.get(i, raw_answers[i - 1] if i - 1 < len(raw_answers) else "")
+            for i in range(1, test.question_count + 1)
+        ]
+        writer.writerow(
+            [
+                result.name_text,
+                result.date_text,
+                result.section_text,
+                result.score,
+                result.needs_review,
+                *answers,
+            ]
+        )
+    return Response(content=buf.getvalue(), media_type="text/csv")
 
 
 @scans_router.post("/{scan_job_id}/grade")

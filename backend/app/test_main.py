@@ -24,8 +24,12 @@ except RuntimeError:
         status_code: int
         content: bytes
 
+        @property
+        def text(self) -> str:
+            return self.content.decode("utf-8")
+
         def json(self) -> Any:
-            return json.loads(self.content.decode("utf-8"))
+            return json.loads(self.text)
 
     class TestClient:  # type: ignore[no-redef]
         def __init__(self, asgi_app: Any) -> None:
@@ -164,6 +168,29 @@ def test_full_grading_and_review_workflow_over_http():
     review_resp = client.get("/review-queue")
     assert review_resp.status_code == 200
     assert [r["id"] for r in review_resp.json()] == [graded["id"]]
+
+    import csv
+    import io
+
+    csv_resp = client.get(f"/batches/{batch_id}/export.csv")
+    assert csv_resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(csv_resp.text)))
+    assert rows[0] == [
+        "name",
+        "date",
+        "section",
+        "score",
+        "needs_review",
+        *(f"q{i}" for i in range(1, 21)),
+    ]
+    assert rows[1] == [
+        graded["name_text"],
+        graded["date_text"],
+        graded["section_text"],
+        str(graded["score"]),
+        str(graded["needs_review"]),
+        *([""] * 20),
+    ]
 
 
 def test_domain_and_upload_errors_map_to_404_and_422():
