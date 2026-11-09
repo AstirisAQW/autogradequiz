@@ -1,13 +1,8 @@
-"""Grades one pending scan job end to end: load its image, classify it against its
-test's template, score it against the answer key, and persist the result.
-
-This assumes scan_job.raw_image_path already points to an image aligned to its
-template's page dimensions. Detecting and correcting a scan's rotation or perspective
-from its fiducial markers -- so an arbitrary phone photo can be used as input here -- is
-a separate step this module does not perform yet.
-
-name_text, date_text, and section_text are left blank: reading them from the scan is the
-OCR phase config.tesseract_cmd is reserved for, which hasn't been built yet either.
+"""Grades one pending scan job end to end: load its image, align it to the template's
+page dimensions using its fiducial markers, classify it against its test's template,
+score it against the answer key, read name/date/section with Tesseract OCR (falling back
+to blank strings on OCR failure while preserving any hand-edited identity values), and
+persist the result.
 """
 
 from __future__ import annotations

@@ -16,7 +16,6 @@ from app.db.exceptions import (
     TestNotFoundError,
 )
 from app.grading_pipeline.exceptions import (
-    ScanImageSizeMismatchError,
     ScanImageUnreadableError,
     ScanJobAlreadyGradedError,
 )
@@ -33,7 +32,6 @@ UNPROCESSABLE_EXCEPTIONS = (
     InvalidTestError,
     UnknownTemplateError,
     ScanImageUnreadableError,
-    ScanImageSizeMismatchError,
     ScanAlignmentError,
 )
 
@@ -71,7 +69,6 @@ def handle_conflict(_request: Request, exc: Exception) -> JSONResponse:
 @app.exception_handler(InvalidCorrectionError)
 @app.exception_handler(UnknownTemplateError)
 @app.exception_handler(ScanImageUnreadableError)
-@app.exception_handler(ScanImageSizeMismatchError)
 @app.exception_handler(ScanAlignmentError)
 def handle_unprocessable(_request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=422, content={"detail": str(exc)})
