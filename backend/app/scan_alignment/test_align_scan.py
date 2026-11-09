@@ -4,10 +4,16 @@ import pytest
 
 from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import TWENTY_QUESTIONS
-from app.bubble_grading.classifier import classify_sheet
+from app.answer_sheet_templates.geometry import ANSWER_CHOICES
+from app.bubble_grading.classifier import classify_sheet, score_sheet
 from app.scan_alignment.align_scan import ScanAlignmentError, align_scan
-from app.sheet_rendering.renderer import blank_canvas, bubble_radius_px, render_sheet
-from app.synthetic_sheets.mark_drawing import draw_marks_for_plan
+from app.sheet_rendering.renderer import (
+    blank_canvas,
+    bubble_position_px,
+    bubble_radius_px,
+    render_sheet,
+)
+from app.synthetic_sheets.mark_drawing import draw_marks_for_plan, draw_perfect_mark
 from app.synthetic_sheets.question_plan import generate_answer_key, generate_question_plans
 from app.synthetic_sheets.scan_artifacts import (
     apply_gaussian_blur,
@@ -57,4 +63,42 @@ def test_align_scan_resolves_180_degree_rotation_via_mid_markers():
 def test_align_scan_raises_when_fewer_than_four_fiducials():
     with pytest.raises(ScanAlignmentError):
         align_scan(blank_canvas(PAGE), TWENTY_QUESTIONS)
+
+
+def _fully_marked_sheet_for_key(answer_key: list[str]) -> np.ndarray:
+    canvas = render_sheet(TWENTY_QUESTIONS, page=PAGE)
+    radius_px = bubble_radius_px(TWENTY_QUESTIONS, PAGE)
+    for q_num, choice in enumerate(answer_key, start=1):
+        center = bubble_position_px(
+            TWENTY_QUESTIONS, q_num, ANSWER_CHOICES.index(choice), PAGE
+        )
+        draw_perfect_mark(canvas, center, radius_px)
+    return canvas
+
+
+def test_align_scan_grades_100_under_45_percent_horizontal_brightness_gradient():
+    rng = np.random.default_rng(31)
+    answer_key = generate_answer_key(TWENTY_QUESTIONS.question_count, rng)
+    sheet = _fully_marked_sheet_for_key(answer_key)
+
+    gradient = np.linspace(1.0, 0.55, sheet.shape[1], dtype=np.float32)[None, :, None]
+    shaded = np.clip(sheet.astype(np.float32) * gradient, 0, 255).astype(np.uint8)
+
+    aligned = align_scan(shaded, TWENTY_QUESTIONS)
+    summary = score_sheet(classify_sheet(aligned, TWENTY_QUESTIONS), answer_key)
+
+    assert summary.score_fraction * 100 == 100.0
+
+
+def test_align_scan_grades_100_on_90_degree_rotated_sheet():
+    rng = np.random.default_rng(37)
+    answer_key = generate_answer_key(TWENTY_QUESTIONS.question_count, rng)
+    sheet = _fully_marked_sheet_for_key(answer_key)
+
+    rotated_90 = cv2.rotate(sheet, cv2.ROTATE_90_CLOCKWISE)
+    aligned = align_scan(rotated_90, TWENTY_QUESTIONS)
+    summary = score_sheet(classify_sheet(aligned, TWENTY_QUESTIONS), answer_key)
+
+    assert summary.score_fraction * 100 == 100.0
+
 
