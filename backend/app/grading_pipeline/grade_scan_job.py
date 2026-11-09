@@ -24,11 +24,13 @@ from app.answer_sheet_templates.catalog import get_template_spec
 from app.answer_sheet_templates.geometry import PageSize
 from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_sheet, score_sheet
 from app.config import get_settings
+from app.db.exceptions import ScanResultNotFoundError
 from app.db.records import NewScanResult, ScanResultRecord
 from app.db.repositories import (
     apply_scan_corrections,
     get_batch,
     get_scan_job,
+    get_scan_result,
     get_test,
     record_scan_error,
     save_scan_result,
@@ -112,13 +114,29 @@ def grade_scan_job(scan_job_id: int, force: bool = False) -> ScanResultRecord:
         question_fills = classify_sheet(aligned_image, template_spec)
         score_summary = score_sheet(question_fills, test.answer_key)
         text_fields = read_text_fields(aligned_image)
+        try:
+            existing = get_scan_result(scan_job.id)
+        except ScanResultNotFoundError:
+            existing = None
 
         save_scan_result(
             NewScanResult(
                 scan_job_id=scan_job.id,
-                name_text=text_fields.get("name", ""),
-                date_text=text_fields.get("date", ""),
-                section_text=text_fields.get("section", ""),
+                name_text=(
+                    existing.name_text
+                    if existing and existing.name_text
+                    else text_fields.get("name", "")
+                ),
+                date_text=(
+                    existing.date_text
+                    if existing and existing.date_text
+                    else text_fields.get("date", "")
+                ),
+                section_text=(
+                    existing.section_text
+                    if existing and existing.section_text
+                    else text_fields.get("section", "")
+                ),
                 score=score_summary.score_fraction * 100,
                 answers_json=question_fills_to_answers_json(question_fills),
                 flags_json=question_fills_to_flags_json(question_fills),

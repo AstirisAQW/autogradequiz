@@ -296,3 +296,41 @@ def test_batch_results_and_corrections_for_never_graded_vs_failed_regrade():
     assert by_job[good_scan["id"]]["score"] == 5.0
     assert by_job[good_scan["id"]]["error_message"] != ""
 
+
+def test_patch_identity_and_preserve_hand_edited_identity_on_regrade():
+    client = TestClient(app)
+    test_id = client.post(
+        "/tests",
+        json={"name": "Quiz", "template_id": "20q_a4", "answer_key": ["A"] * 20},
+    ).json()["id"]
+    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
+
+    scan = client.post(
+        f"/batches/{batch_id}/scans",
+        files={
+            "file": (
+                "sheet.png",
+                _encode_png(render_sheet(TWENTY_QUESTIONS, page=PAGE)),
+                "image/png",
+            )
+        },
+    ).json()
+    assert client.post(f"/scans/{scan['id']}/grade").status_code == 200
+
+    identity_resp = client.patch(
+        f"/scans/{scan['id']}/identity",
+        json={"name_text": "Alice Kim", "date_text": "2026-11-09", "section_text": "4A"},
+    )
+    assert identity_resp.status_code == 200
+    assert identity_resp.json()["name_text"] == "Alice Kim"
+    assert identity_resp.json()["date_text"] == "2026-11-09"
+    assert identity_resp.json()["section_text"] == "4A"
+
+    regrade_resp = client.post(f"/scans/{scan['id']}/grade?force=true")
+    assert regrade_resp.status_code == 200
+    regraded = regrade_resp.json()
+    assert regraded["name_text"] == "Alice Kim"
+    assert regraded["date_text"] == "2026-11-09"
+    assert regraded["section_text"] == "4A"
+
+

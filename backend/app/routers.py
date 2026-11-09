@@ -34,6 +34,12 @@ class CorrectionsRequest(BaseModel):
     corrections: dict[int, str]
 
 
+class IdentityRequest(BaseModel):
+    name_text: str | None = None
+    date_text: str | None = None
+    section_text: str | None = None
+
+
 tests_router = APIRouter(prefix="/tests", tags=["tests"])
 batches_router = APIRouter(prefix="/batches", tags=["batches"])
 scans_router = APIRouter(prefix="/scans", tags=["scans"])
@@ -132,6 +138,18 @@ def apply_corrections_endpoint(
     scan_job_id: int, payload: CorrectionsRequest
 ) -> ScanResultRecord:
     return repositories.apply_scan_corrections(scan_job_id, payload.corrections)
+
+
+@scans_router.patch("/{scan_job_id}/identity")
+def update_identity_endpoint(
+    scan_job_id: int, payload: IdentityRequest
+) -> ScanResultRecord:
+    return repositories.update_scan_identity(
+        scan_job_id,
+        name_text=payload.name_text,
+        date_text=payload.date_text,
+        section_text=payload.section_text,
+    )
 
 
 @review_router.get("")

@@ -380,4 +380,29 @@ def apply_scan_corrections(scan_job_id: int, corrections: dict[int, str]) -> Sca
     )
 
 
+def update_scan_identity(
+    scan_job_id: int,
+    name_text: str | None = None,
+    date_text: str | None = None,
+    section_text: str | None = None,
+) -> ScanResultRecord:
+    """Set name_text, date_text, and/or section_text on an existing scan result."""
+    result = get_scan_result(scan_job_id)
+    return save_scan_result(
+        NewScanResult(
+            scan_job_id=result.scan_job_id,
+            name_text=result.name_text if name_text is None else name_text,
+            date_text=result.date_text if date_text is None else date_text,
+            section_text=result.section_text if section_text is None else section_text,
+            score=result.score,
+            answers_json=result.answers_json,
+            flags_json=result.flags_json,
+            needs_review=result.needs_review,
+            processed_image_path=result.processed_image_path,
+            error_message=result.error_message,
+        )
+    )
+
+
+
 
