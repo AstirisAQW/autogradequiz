@@ -193,6 +193,7 @@ def _scan_result_from_row(row: sqlite3.Row) -> ScanResultRecord:
         processed_image_path=row["processed_image_path"],
         error_message=row["error_message"],
         created_at=row["created_at"],
+        status=row["status"],
     )
 
 
@@ -256,7 +257,12 @@ def get_scan_result(scan_job_id: int) -> ScanResultRecord:
     """Return the result for one scan job, or raise ScanResultNotFoundError."""
     with get_connection() as connection:
         row = connection.execute(
-            "SELECT * FROM scan_results WHERE scan_job_id = ?", (scan_job_id,)
+            """
+            SELECT scan_results.*, scan_jobs.status AS status FROM scan_results
+            JOIN scan_jobs ON scan_jobs.id = scan_results.scan_job_id
+            WHERE scan_results.scan_job_id = ?
+            """,
+            (scan_job_id,),
         ).fetchone()
     if row is None:
         raise ScanResultNotFoundError(scan_job_id)
@@ -269,7 +275,7 @@ def list_scan_results_for_batch(batch_id: int) -> list[ScanResultRecord]:
     with get_connection() as connection:
         rows = connection.execute(
             """
-            SELECT scan_results.* FROM scan_results
+            SELECT scan_results.*, scan_jobs.status AS status FROM scan_results
             JOIN scan_jobs ON scan_jobs.id = scan_results.scan_job_id
             WHERE scan_jobs.batch_id = ?
             ORDER BY scan_results.created_at ASC
@@ -283,7 +289,12 @@ def list_scan_results_needing_review() -> list[ScanResultRecord]:
     """Return every scan result flagged for manual review, oldest first."""
     with get_connection() as connection:
         rows = connection.execute(
-            "SELECT * FROM scan_results WHERE needs_review = 1 ORDER BY created_at ASC"
+            """
+            SELECT scan_results.*, scan_jobs.status AS status FROM scan_results
+            JOIN scan_jobs ON scan_jobs.id = scan_results.scan_job_id
+            WHERE scan_results.needs_review = 1
+            ORDER BY scan_results.created_at ASC
+            """
         ).fetchall()
     return [_scan_result_from_row(row) for row in rows]
 
@@ -305,6 +316,9 @@ def apply_scan_corrections(scan_job_id: int, corrections: dict[int, str]) -> Sca
     recompute the score, and clear needs_review once all flagged questions are resolved."""
     scan_job = get_scan_job(scan_job_id)
     result = get_scan_result(scan_job_id)
+    raw_answers: list[str] = json.loads(result.answers_json)
+    if not raw_answers:
+        raise InvalidCorrectionError(f"Scan job {scan_job_id} has no graded answers to correct.")
     batch = get_batch(scan_job.batch_id)
     test = get_test(batch.test_id)
 
@@ -328,7 +342,6 @@ def apply_scan_corrections(scan_job_id: int, corrections: dict[int, str]) -> Sca
         connection.commit()
 
     all_corrections = get_scan_corrections(scan_job_id)
-    raw_answers: list[str] = json.loads(result.answers_json)
     flags: dict[str, list[int]] = json.loads(result.flags_json)
     flagged = set(flags.get("ambiguous", [])) | set(flags.get("multiple", []))
 

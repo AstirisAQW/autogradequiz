@@ -126,9 +126,8 @@ def grade_scan_job(scan_job_id: int, force: bool = False) -> ScanResultRecord:
                 processed_image_path=processed_image_path,
             )
         )
-        scan_result = apply_scan_corrections(scan_job.id, {})
         update_scan_job_status(scan_job.id, "done")
-        return scan_result
+        return apply_scan_corrections(scan_job.id, {})
     except Exception as exc:
         record_scan_error(scan_job.id, str(exc))
         update_scan_job_status(scan_job.id, "failed")

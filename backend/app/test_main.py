@@ -67,15 +67,16 @@ except RuntimeError:
                 )
             headers.append((b"content-length", str(len(body)).encode("utf-8")))
 
+            path_part, _, query_part = path.partition("?")
             scope = {
                 "type": "http",
                 "asgi": {"version": "3.0"},
                 "http_version": "1.1",
                 "method": method,
                 "scheme": "http",
-                "path": path,
-                "raw_path": path.encode("utf-8"),
-                "query_string": b"",
+                "path": path_part,
+                "raw_path": path_part.encode("utf-8"),
+                "query_string": query_part.encode("utf-8"),
                 "headers": headers,
                 "client": ("127.0.0.1", 50000),
                 "server": ("testserver", 80),
@@ -112,6 +113,9 @@ except RuntimeError:
             files: dict[str, tuple[str, bytes, str]] | None = None,
         ) -> _Response:
             return self._request("POST", path, json_body=json, files=files)
+
+        def patch(self, path: str, *, json: Any = None) -> _Response:
+            return self._request("PATCH", path, json_body=json)
 
 
 @pytest.fixture(autouse=True)
@@ -235,3 +239,60 @@ def test_domain_and_upload_errors_map_to_404_and_422():
         files={"file": ("white.png", _encode_png(blank_canvas(PAGE)), "image/png")},
     ).json()["id"]
     assert client.post(f"/scans/{unalignable_job_id}/grade").status_code == 422
+
+
+def test_batch_results_and_corrections_for_never_graded_vs_failed_regrade():
+    from pathlib import Path
+
+    client = TestClient(app)
+    test_id = client.post(
+        "/tests",
+        json={"name": "Quiz", "template_id": "20q_a4", "answer_key": ["A"] * 20},
+    ).json()["id"]
+    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
+
+    never_graded = client.post(
+        f"/batches/{batch_id}/scans",
+        files={"file": ("white.png", _encode_png(blank_canvas(PAGE)), "image/png")},
+    ).json()
+    assert client.post(f"/scans/{never_graded['id']}/grade").status_code == 422
+    assert (
+        client.patch(
+            f"/scans/{never_graded['id']}/corrections",
+            json={"corrections": {"1": "A"}},
+        ).status_code
+        == 422
+    )
+
+    good_scan = client.post(
+        f"/batches/{batch_id}/scans",
+        files={
+            "file": (
+                "sheet.png",
+                _encode_png(render_sheet(TWENTY_QUESTIONS, page=PAGE)),
+                "image/png",
+            )
+        },
+    ).json()
+    assert client.post(f"/scans/{good_scan['id']}/grade").status_code == 200
+
+    Path(good_scan["raw_image_path"]).unlink()
+    assert client.post(f"/scans/{good_scan['id']}/grade?force=true").status_code == 422
+
+    patch_resp = client.patch(
+        f"/scans/{good_scan['id']}/corrections",
+        json={"corrections": {"1": "A"}},
+    )
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["score"] == 5.0
+
+    by_job = {
+        r["scan_job_id"]: r for r in client.get(f"/batches/{batch_id}/results").json()
+    }
+    assert by_job[never_graded["id"]]["status"] == "failed"
+    assert by_job[never_graded["id"]]["error_message"] != ""
+
+    assert by_job[good_scan["id"]]["status"] == "failed"
+    assert by_job[good_scan["id"]]["score"] == 5.0
+    assert by_job[good_scan["id"]]["error_message"] != ""
+
