@@ -391,4 +391,47 @@ def test_marked_sheet_score_and_correction_end_to_end():
     assert updated["needs_review"] is False
 
 
+def test_ungraded_scan_appears_pending_and_csv_escapes_formulas():
+    import csv
+    import io
+
+    client = TestClient(app)
+    test_id = client.post(
+        "/tests",
+        json={"name": "Quiz", "template_id": "20q_a4", "answer_key": ["A"] * 20},
+    ).json()["id"]
+    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
+
+    ungraded = client.post(
+        f"/batches/{batch_id}/scans",
+        files={
+            "file": (
+                "sheet.png",
+                _encode_png(render_sheet(TWENTY_QUESTIONS, page=PAGE)),
+                "image/png",
+            )
+        },
+    ).json()
+
+    results = client.get(f"/batches/{batch_id}/results").json()
+    assert len(results) == 1
+    assert results[0]["scan_job_id"] == ungraded["id"]
+    assert results[0]["status"] == "pending"
+    assert results[0]["score"] == 0.0
+    assert results[0]["answers_json"] == "[]"
+
+    assert client.post(f"/scans/{ungraded['id']}/grade").status_code == 200
+    assert (
+        client.patch(
+            f"/scans/{ungraded['id']}/identity",
+            json={"name_text": "=1+1"},
+        ).status_code
+        == 200
+    )
+
+    rows = list(csv.reader(io.StringIO(client.get(f"/batches/{batch_id}/export.csv").text)))
+    assert rows[1][0] == "'=1+1"
+
+
+
 
