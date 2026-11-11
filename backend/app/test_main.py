@@ -14,6 +14,7 @@ from app.db.connection import init_db
 from app.main import app
 from app.sheet_rendering.renderer import blank_canvas, render_sheet
 from app.synthetic_sheets.generator import generate_synthetic_sheet
+from app.synthetic_sheets.question_plan import QuestionMarkKind
 
 try:
     from fastapi.testclient import TestClient
@@ -332,5 +333,62 @@ def test_patch_identity_and_preserve_hand_edited_identity_on_regrade():
     assert regraded["name_text"] == "Alice Kim"
     assert regraded["date_text"] == "2026-11-09"
     assert regraded["section_text"] == "4A"
+
+
+def test_marked_sheet_score_and_correction_end_to_end():
+    client = TestClient(app)
+    answer_key = ["A", "B", "C", "D"] * 5
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=2, answer_key=answer_key)
+
+    test_id = client.post(
+        "/tests",
+        json={
+            "name": "End-to-End Quiz",
+            "template_id": TWENTY_QUESTIONS.template_id,
+            "answer_key": answer_key,
+        },
+    ).json()["id"]
+    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
+
+    scan_id = client.post(
+        f"/batches/{batch_id}/scans",
+        files={"file": ("marked.png", _encode_png(sheet.image), "image/png")},
+    ).json()["id"]
+    assert client.post(f"/scans/{scan_id}/grade").status_code == 200
+
+    results = client.get(f"/batches/{batch_id}/results").json()
+    assert len(results) == 1
+    result = results[0]
+
+    filled_kinds = {QuestionMarkKind.PERFECT, QuestionMarkKind.OFF_CENTER}
+    expected_correct = sum(
+        1
+        for plan in sheet.question_plans
+        if plan.mark_kind in filled_kinds
+        and plan.marked_choices == (answer_key[plan.question_number - 1],)
+    )
+    expected_score = (expected_correct / len(sheet.question_plans)) * 100.0
+    assert result["score"] == expected_score
+    assert result["needs_review"] is True
+
+    answers = json.loads(result["answers_json"])
+    for plan in sheet.question_plans:
+        if plan.mark_kind == QuestionMarkKind.PERFECT:
+            assert answers[plan.question_number - 1] == plan.marked_choices[0]
+
+    flags = json.loads(result["flags_json"])
+    flagged_questions = flags["ambiguous"] + flags["multiple"]
+    assert len(flagged_questions) == 1
+    flagged_q = flagged_questions[0]
+
+    patch_resp = client.patch(
+        f"/scans/{scan_id}/corrections",
+        json={"corrections": {str(flagged_q): answer_key[flagged_q - 1]}},
+    )
+    assert patch_resp.status_code == 200
+    updated = patch_resp.json()
+    assert updated["score"] == ((expected_correct + 1) / len(sheet.question_plans)) * 100.0
+    assert updated["needs_review"] is False
+
 
 
