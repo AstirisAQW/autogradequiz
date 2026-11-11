@@ -1,107 +1,149 @@
 # AutoGradeQuiz
 
-AutoGradeQuiz grades scanned bubble-sheet quizzes. A test is defined against one of a
-fixed set of question-count templates (20/50/100 questions); a batch of student sheets
-is scanned; each scan is classified bubble-by-bubble and scored against the test's
-answer key.
+AutoGradeQuiz grades multiple-choice answer sheets from scanned or photographed pages.
+A teacher prints a sheet, students fill in the bubbles, and the app reads the answers,
+scores them against an answer key, and lets the teacher fix doubtful answers before
+exporting the results as CSV.
 
-The repo has two parts:
+> **Status: work in progress.** The backend is built and tested on synthetic sheets only.
+> It has not been calibrated on real scans yet, and there is no client app yet.
 
-- `backend/` -- a FastAPI service and the grading logic. See below.
-- `frontend/` -- a Next.js UI, wrapped for desktop with Tauri (`src-tauri/`).
+## How it works
 
-## Backend layout
+1. **Template.** Three A4 sheet templates (20, 50 and 100 questions) are defined in
+   millimeters and converted to page-fraction geometry. Each sheet has corner markers,
+   Name / Date / Section boxes, and answer bubbles A to E.
+2. **Alignment.** The scan is found by its four corner markers and warped to the template
+   page size. A sheet rotated by 180 degrees is detected and turned the right way.
+   A scan with fewer than four markers is rejected, never graded.
+3. **Grading.** The fill ratio of each bubble is measured. Each question becomes one of
+   `correct`, `wrong`, `blank`, `ambiguous` or `multiple`, and the sheet is scored.
+4. **Identity.** Name, date and section are read with Tesseract OCR. If OCR fails, the
+   fields stay empty and grading still completes.
+5. **Review.** Sheets with ambiguous or multiple answers, or with every question blank,
+   are flagged `needs_review`. A teacher corrects answers and identity fields by hand.
+   Corrections are stored separately and the original answers are kept.
+6. **Export.** Batch results download as CSV.
 
-Each folder under `backend/app/` owns exactly one responsibility, so the name alone
-tells you what's in it and where new code for that concern belongs:
+## Requirements
 
-```
-backend/app/
-├── answer_sheet_templates/   Defines the 20/50/100-question templates: their
-│                             millimeter layout (layout_spec.py), the fraction-of-page
-│                             geometry built from it (geometry.py, builder.py), the
-│                             fixed catalog of templates (catalog.py), and JSON export
-│                             (json_export.py) for the frontend/desktop app.
-├── sheet_rendering/          Draws a blank answer sheet -- fiducials, text fields,
-│                             bubble grid -- from a template (renderer.py). Both the
-│                             real print pipeline and the synthetic test-data generator
-│                             render through this, so a bubble drawn here and a bubble
-│                             graded by bubble_grading/ are always the same position.
-├── bubble_grading/           Classifies a filled-in sheet image bubble by bubble
-│                             (classifier.py) and scores the result against an answer
-│                             key. Assumes the image is already aligned to its
-│                             template's page dimensions.
-├── synthetic_sheets/         Generates fake scanned sheets with known ground truth,
-│                             for testing bubble_grading without needing real scanned
-│                             quizzes: question_plan.py picks what should happen on
-│                             each question, mark_drawing.py and stray_marks.py draw
-│                             it, scan_artifacts.py simulates scan/photo damage,
-│                             generator.py ties it together, ground_truth.py
-│                             serializes the answer key (never the image -- it's
-│                             reproducible from its seed).
-├── grading_pipeline/         Orchestrates one scan job end to end: load its image,
-│                             classify it against its test's template, score it, and
-│                             persist the result (grade_scan_job.py).
-├── db/                       SQLite persistence: connection handling, the schema,
-│                             typed records, and repository functions.
-├── config.py                 App-wide settings (db path, data dir).
-└── main.py                   FastAPI app.
-```
+- Python 3.13 or newer
+- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) installed (needed only to
+  read names, dates and sections). On Windows, install it and set `TESSERACT_CMD` to the
+  full path of `tesseract.exe` if it is not on your `PATH`.
 
-`scripts/` holds one-off developer scripts (`generate_templates.py`,
-`generate_synthetic_sheets.py`) that write real files to `data/` for local inspection --
-nothing in the app or test suite writes there automatically.
+## Setup
 
-### Data model (`db/schema.sql`)
-
-`tests` (a template + answer key) → `batches` (a grading run of a test) → `scan_jobs`
-(one uploaded sheet image) → `scan_results` (one scored, gradable outcome per scan job).
-
-### The grading pipeline
-
-`grading_pipeline.grade_scan_job.grade_scan_job(scan_job_id)` is the one function that
-wires everything above together:
+From the repository root:
 
 ```
-scan_job → load image → answer_sheet_templates (look up the test's template)
-         → bubble_grading.classify_sheet → bubble_grading.score_sheet
-         → db.save_scan_result → db.update_scan_job_status("done")
-```
-
-It flags a scan for human review whenever any question comes back ambiguous or
-multiply-marked, rather than guessing.
-
-**Known gap:** it assumes `scan_job.raw_image_path` is already aligned to the
-template's page dimensions. Detecting and correcting a real photo's rotation and
-perspective from its fiducial markers -- so an arbitrary phone photo can be graded
-directly -- is a separate step that doesn't exist yet.
-
-**Also reserved for later:** `name_text`, `date_text`, and `section_text` on
-`scan_results` are always written blank. Reading them from the scan is an OCR phase
-that `config.tesseract_cmd` is reserved for; `pytesseract` is declared as a dependency
-but isn't wired up to anything yet.
-
-## Getting started
-
-```bash
 cd backend
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # macOS / Linux
 pip install -e ".[dev]"
-
-pytest app                       # run the full test suite
-ruff check app scripts           # lint
-
-python scripts/generate_templates.py             # write template PNG/PDF/JSON to data/
-python scripts/generate_synthetic_sheets.py      # write synthetic test sheets to data/
-
-uvicorn app.main:app --reload    # run the API
 ```
 
-## Conventions
+## Run the API
 
-- No inline comments. Explain a piece of code by naming it well, extracting it into its
-  own well-named function or module, or writing a docstring on its public entry point --
-  not with a trailing `#` comment. A couple of module-level constants that need a short
-  note use a plain string literal on the line below them instead (an "attribute
-  docstring"), since a `#` comment isn't the only way to document a constant.
-- Tests live next to the code they test (`test_*.py` alongside the module), not in a
-  separate top-level test tree.
+```
+cd backend
+uvicorn app.main:app --reload
+```
+
+Open <http://127.0.0.1:8000/docs> for interactive API docs. Health check: `GET /health`.
+
+The SQLite database and uploaded scans are stored under `backend/data/`.
+
+### Settings
+
+Set these as environment variables if you need to change the defaults.
+
+| Variable             | Default                     | Purpose                                      |
+| -------------------- | --------------------------- | -------------------------------------------- |
+| `AUTOGRADE_DATA_DIR` | `backend/data`              | Where uploads and processed images are saved |
+| `AUTOGRADE_DB_PATH`  | `backend/data/autograde.db` | SQLite database file                         |
+| `TESSERACT_CMD`      | empty (uses `PATH`)         | Full path to the Tesseract program           |
+
+## API overview
+
+| Method | Path                               | What it does                                               |
+| ------ | ---------------------------------- | ---------------------------------------------------------- |
+| POST   | `/tests`                           | Create a test: name, `template_id`, answer key             |
+| POST   | `/tests/{test_id}/batches`         | Create a batch of scans under a test                       |
+| POST   | `/batches/{batch_id}/scans`        | Upload a PNG or JPEG scan (up to 10 MB)                    |
+| POST   | `/scans/{scan_job_id}/grade`       | Grade a scan. Add `?force=true` to regrade a done scan     |
+| GET    | `/batches/{batch_id}/results`      | List results, with job status and any error                |
+| GET    | `/batches/{batch_id}/export.csv`   | Download results as CSV                                    |
+| GET    | `/review-queue`                    | List scans that need review                                |
+| PATCH  | `/scans/{scan_job_id}/corrections` | Correct answers, for example `{"corrections": {"1": "B"}}` |
+| PATCH  | `/scans/{scan_job_id}/identity`    | Set name, date or section by hand                          |
+
+Template ids: `20q_a4`, `50q_a4`, `100q_a4`. The answer key needs one letter from A to E
+per question.
+
+Error codes: `404` not found, `409` scan already graded, `422` invalid input or a scan
+that cannot be aligned.
+
+### Try it
+
+1. `POST /tests` with `template_id` `20q_a4` and a 20-letter answer key.
+2. `POST /tests/{id}/batches`.
+3. `POST /batches/{id}/scans` with a sheet image.
+4. `POST /scans/{id}/grade`.
+5. `GET /batches/{id}/results`, then `GET /batches/{id}/export.csv`.
+
+## Tests and lint
+
+```
+cd backend
+pytest
+ruff check .
+```
+
+## Generate sheets
+
+Print templates (PNG, PDF and JSON) are written to `backend/data/templates/`:
+
+```
+cd backend
+python scripts/generate_templates.py
+```
+
+Print them at 100% scale. Do not use "fit to page", because it changes the marker
+geometry.
+
+Synthetic filled-in sheets for testing are written to `backend/data/synthetic_sheets/`:
+
+```
+python scripts/generate_synthetic_sheets.py
+python scripts/generate_synthetic_sheets.py --templates 20q_a4 --count 10 --pdf
+python scripts/generate_synthetic_sheets.py --start-seed 100 --count 3
+```
+
+## Project layout
+
+```
+backend/
+  app/
+    answer_sheet_templates/   template definitions and geometry
+    sheet_rendering/          draws printable sheets
+    scan_alignment/           finds corner markers and warps scans
+    bubble_grading/           bubble classifier and scoring
+    grading_pipeline/         grades one scan job end to end
+    db/                       SQLite schema and repositories
+    synthetic_sheets/         fake filled-in sheets for tests
+    main.py, routers.py       FastAPI app and routes
+  data/templates/             printable sheets and template JSON
+  scripts/                    sheet generators
+```
+
+## Known limits
+
+- Thresholds are tuned on synthetic marks only. Light pencil marks on the 100-question
+  sheet may read as blank.
+- OCR on handwriting is weak. Use the identity endpoint to fix names.
+- Scans taken in very uneven light or with extreme perspective can be rejected.
+- Uploads are checked by content type and size only.
+- Grading runs inside the request. There is no background worker.
+- Cells in the CSV that start with `=`, `+`, `-` or `@` are not yet escaped.
