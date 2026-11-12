@@ -182,7 +182,7 @@ def update_scan_job_status(scan_job_id: int, status: str) -> ScanJobRecord:
 def _scan_result_from_row(row: sqlite3.Row) -> ScanResultRecord:
     return ScanResultRecord(
         id=row["id"] or 0,
-        scan_job_id=row["scan_job_id"] or row["job_id"],
+        scan_job_id=row["scan_job_id"],
         name_text=row["name_text"] or "",
         date_text=row["date_text"] or "",
         section_text=row["section_text"] or "",
@@ -275,7 +275,8 @@ def list_scan_results_for_batch(batch_id: int) -> list[ScanResultRecord]:
     with get_connection() as connection:
         rows = connection.execute(
             """
-            SELECT scan_results.*, scan_jobs.id AS job_id, scan_jobs.status AS status
+            SELECT COALESCE(scan_results.scan_job_id, scan_jobs.id) AS scan_job_id,
+                   scan_results.*, scan_jobs.status AS status
             FROM scan_jobs
             LEFT JOIN scan_results ON scan_results.scan_job_id = scan_jobs.id
             WHERE scan_jobs.batch_id = ?
