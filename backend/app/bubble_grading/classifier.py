@@ -192,32 +192,6 @@ def _background_level(
     return float(np.median(background_pixels))
 
 
-def _local_dark_threshold(
-    patch: np.ndarray,
-    patch_center: tuple[int, int],
-    widened_radius_px_value: int,
-    thresholds: ClassifierThresholds,
-) -> float:
-    """This bubble's own dark/light cutoff, anchored to this bubble's own paper color.
-
-    Using a per-bubble threshold instead of one BLANK_THRESHOLD for the whole sheet means
-    a shadow across one corner of the page doesn't push every bubble in that corner
-    toward the wrong class -- each bubble is judged against the paper right around it.
-
-    The cutoff sits a fixed distance below that local white level rather than at a split
-    found by histogram search: a printed bubble outline blurred by scanning is a soft,
-    partial-intensity edge, not a solid dark shape, and histogram-based thresholds can
-    mistake that blur for its own cluster and count it as ink. Fixed-offset-from-white
-    doesn't have that failure mode, as long as the offset comfortably clears the
-    outline's own (much smaller) darkness relative to blank paper.
-    """
-    sample_radius = int(
-        round(widened_radius_px_value * thresholds.background_sample_radius_multiplier)
-    )
-    background_level = _background_level(patch, patch_center, sample_radius)
-    return background_level - thresholds.dark_offset
-
-
 def _bucket_fill_ratio(fill_ratio: float, thresholds: ClassifierThresholds) -> BubbleResult:
     if fill_ratio <= thresholds.blank_max_ratio:
         return BubbleResult.BLANK
@@ -244,6 +218,10 @@ def classify_bubble(
     sample_radius = int(
         round(widened_radius * thresholds.background_sample_radius_multiplier)
     )
+    # Cutoffs sit a fixed distance below this bubble's own local white level, so a shadow
+    # across part of the page doesn't shift every bubble the same way. A fixed offset is
+    # used instead of a histogram split because a blurred printed outline is a soft edge
+    # that histogram thresholds can mistake for ink.
     background_level = _background_level(patch, patch_center, sample_radius)
     dark_threshold = background_level - thresholds.dark_offset
     dark_mask = patch <= dark_threshold
