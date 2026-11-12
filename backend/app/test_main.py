@@ -337,7 +337,7 @@ def test_patch_identity_and_preserve_hand_edited_identity_on_regrade():
 
 def test_marked_sheet_score_and_correction_end_to_end():
     client = TestClient(app)
-    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=12)
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1128)
 
     test_id = client.post(
         "/tests",

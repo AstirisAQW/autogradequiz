@@ -1,9 +1,16 @@
+import cv2
 import numpy as np
 
 from app.answer_sheet_templates.builder import PAGE
-from app.answer_sheet_templates.catalog import HUNDRED_QUESTIONS
-from app.bubble_grading.classifier import BubbleResult, QuestionOutcome, classify_sheet, score_sheet
-from app.sheet_rendering.renderer import bubble_radius_px, render_sheet
+from app.answer_sheet_templates.catalog import FIFTY_QUESTIONS, HUNDRED_QUESTIONS, TWENTY_QUESTIONS
+from app.bubble_grading.classifier import (
+     DEFAULT_THRESHOLDS,
+    BubbleResult,
+    QuestionOutcome,
+    classify_sheet,
+    score_sheet,
+)
+from app.sheet_rendering.renderer import bubble_position_px, bubble_radius_px, render_sheet
 from app.synthetic_sheets.mark_drawing import draw_marks_for_plan
 from app.synthetic_sheets.question_plan import QuestionMarkKind, generate_question_plans
 
@@ -117,3 +124,44 @@ def test_score_sheet_marks_correct_and_wrong_only_for_filled_questions():
     for question_number, outcome in summary.question_outcomes.items():
         if outcome in (QuestionOutcome.CORRECT, QuestionOutcome.WRONG):
             assert question_fills[question_number].result == BubbleResult.FILLED
+
+
+def test_clean_unmarked_template_has_trace_ratio_at_or_below_0_002():
+    for template in (TWENTY_QUESTIONS, FIFTY_QUESTIONS, HUNDRED_QUESTIONS):
+        canvas = render_sheet(template, page=PAGE)
+        fills = classify_sheet(canvas, template, PAGE)
+        for fill in fills.values():
+            for _, bubble_fill in fill.bubble_fills:
+                assert bubble_fill.trace_ratio <= 0.002
+
+
+def test_printed_outline_alone_never_counts_as_trace():
+    for template in (TWENTY_QUESTIONS, FIFTY_QUESTIONS, HUNDRED_QUESTIONS):
+        canvas = render_sheet(template, page=PAGE)
+        fills = classify_sheet(canvas, template, PAGE)
+        for fill in fills.values():
+            assert fill.result == BubbleResult.BLANK
+            assert fill.marked_choices == ()
+            for _, bubble_fill in fill.bubble_fills:
+                assert bubble_fill.trace_ratio < DEFAULT_THRESHOLDS.trace_min_ratio
+
+
+def test_ink_between_old_and_new_cutoffs_reads_ambiguous_and_clean_blank_reads_blank():
+    canvas = render_sheet(TWENTY_QUESTIONS, page=PAGE)
+    radius_px = bubble_radius_px(TWENTY_QUESTIONS, PAGE)
+    center_b = bubble_position_px(TWENTY_QUESTIONS, 1, 1, PAGE)
+    # Gray 180 is between 255 - dark_offset (165) and 255 - trace_dark_offset (205).
+    cv2.circle(canvas, center_b, radius_px, (180, 180, 180), -1)
+
+    fills = classify_sheet(canvas, TWENTY_QUESTIONS, PAGE)
+
+    q1 = fills[1]
+    assert q1.result == BubbleResult.AMBIGUOUS
+    assert q1.marked_choices == ("B",)
+    q1_b = dict(q1.bubble_fills)["B"]
+    assert q1_b.fill_ratio <= DEFAULT_THRESHOLDS.blank_max_ratio
+    assert q1_b.trace_ratio >= DEFAULT_THRESHOLDS.trace_min_ratio
+
+    q2 = fills[2]
+    assert q2.result == BubbleResult.BLANK
+    assert q2.marked_choices == ()

@@ -140,8 +140,8 @@ backend/
 
 ## Known limits
 
-- Thresholds are tuned on synthetic marks only. Light pencil marks on the 100-question
-  sheet may read as blank.
+- Classifier thresholds (`fill_ratio` and `trace_ratio`) are calibrated on synthetic marks
+  only and need calibration on real scans; very faint marks can still read as blank.
 - OCR on handwriting is weak. Use the identity endpoint to fix names.
 - Scans taken in very uneven light or with extreme perspective can be rejected.
 - Uploads are checked by content type and size only.
