@@ -26,6 +26,12 @@ def _fiducial_center_px(x_mm: float, y_mm: float, page: PageSize) -> list[float]
     return [(x0 + x1) / 2.0, (y0 + y1) / 2.0]
 
 
+def marker_long_side_ok(long_side: float, fid_px: float, touches_border: bool) -> bool:
+    """A marker clipped by the image border may be as short as half the nominal size."""
+    min_long_side = fid_px * 0.5 if touches_border else fid_px * 0.75
+    return min_long_side <= long_side <= fid_px * 1.3
+
+
 def _find_marker_in_window(
     gray_image: np.ndarray,
     x0: int,
@@ -62,8 +68,7 @@ def _find_marker_in_window(
         near_bottom = (gy + bh) >= img_h - border_margin
         touches_border = near_left or near_right or near_top or near_bottom
 
-        min_long_side = fid_px * 0.5 if touches_border else fid_px * 0.75
-        if not (min_long_side <= long_side <= fid_px * 1.3) or area / (w * h) < 0.4:
+        if not marker_long_side_ok(long_side, fid_px, touches_border) or area / (w * h) < 0.4:
             continue
         if not touches_border and short_side / long_side < 0.75:
             continue

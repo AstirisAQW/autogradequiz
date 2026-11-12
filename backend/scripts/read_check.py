@@ -16,7 +16,7 @@ from app.answer_sheet_templates.catalog import (
 from app.answer_sheet_templates.geometry import FIDUCIAL_SIZE_MM, PageSize
 from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_sheet
 from app.config import get_settings
-from app.scan_alignment.align_scan import ScanAlignmentError, align_scan
+from app.scan_alignment.align_scan import ScanAlignmentError, align_scan, marker_long_side_ok
 from app.sheet_rendering.renderer import mm_length_to_px, mm_to_px
 from app.synthetic_sheets.generator import generate_synthetic_sheet
 from app.synthetic_sheets.question_plan import QuestionMarkKind, QuestionPlan
@@ -132,7 +132,7 @@ def inspect_corners(
             reasons: list[str] = []
             if area < 150:
                 reasons.append(f"area({area:.0f}<150)")
-            if not (fid_px * 0.75 <= long_side <= fid_px * 1.3):
+            if not marker_long_side_ok(long_side, fid_px, touches_border):
                 reasons.append(f"shape(long_side={long_side:.1f})")
             if area / (w * h) < 0.4:
                 reasons.append(f"area_ratio({area / (w * h):.2f}<0.40)")
