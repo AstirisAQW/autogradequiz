@@ -22,6 +22,16 @@ from app.synthetic_sheets.generator import generate_synthetic_sheet
 from app.synthetic_sheets.question_plan import QuestionMarkKind, QuestionPlan
 
 TEMPLATES = (TWENTY_QUESTIONS, FIFTY_QUESTIONS, HUNDRED_QUESTIONS)
+GENERATOR_MAX_ANGLE_DEG = 5.0
+ANGLE_BUCKETS: tuple[tuple[str, float, float], ...] = (
+    ("0-1", 0.0, 1.0),
+    ("1-2", 1.0, 2.0),
+    ("2-3", 2.0, 3.0),
+    ("3-4", 3.0, 4.0),
+    ("4-4.5", 4.0, 4.5),
+    ("4.5-5", 4.5, 5.0),
+)
+CORNER_NAMES = ("TL", "TR", "BR", "BL")
 MARK_KIND_ORDER = (
     QuestionMarkKind.PERFECT,
     QuestionMarkKind.BLANK,
@@ -68,7 +78,9 @@ def matches_plan(plan: QuestionPlan, fill: QuestionFill) -> bool:
     return True
 
 
-def count_fiducial_candidates(image: np.ndarray, page: PageSize = PAGE) -> list[int]:
+def inspect_corners(
+    image: np.ndarray, page: PageSize = PAGE
+) -> tuple[list[int], dict[str, str]]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
     img_h, img_w = gray.shape[:2]
     page_w_px, _ = mm_to_px(page.width_mm, page.height_mm, page)
@@ -77,44 +89,75 @@ def count_fiducial_candidates(image: np.ndarray, page: PageSize = PAGE) -> list[
 
     win_h, win_w = img_h // 4, img_w // 4
     windows = (
-        (0, 0, win_w, win_h),
-        (img_w - win_w, 0, img_w, win_h),
-        (img_w - win_w, img_h - win_h, img_w, img_h),
-        (0, img_h - win_h, win_w, img_h),
+        ("TL", 0, 0, win_w, win_h, 0.0, 0.0),
+        ("TR", img_w - win_w, 0, img_w, win_h, float(img_w), 0.0),
+        ("BR", img_w - win_w, img_h - win_h, img_w, img_h, float(img_w), float(img_h)),
+        ("BL", 0, img_h - win_h, win_w, img_h, 0.0, float(img_h)),
     )
 
     counts: list[int] = []
-    for x0, y0, x1, y1 in windows:
+    report: dict[str, str] = {}
+    for name, x0, y0, x1, y1, corner_x, corner_y in windows:
         sub = gray[y0:y1, x0:x1]
         if int(sub.max()) - int(sub.min()) < 40:
             counts.append(0)
+            report[name] = "rejected(low_contrast)"
             continue
         _, binary = cv2.threshold(sub, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         window_count = 0
+        closest_rejected: tuple[float, list[str]] | None = None
+
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area < 150:
+            if area < 10:
                 continue
-            (_, _), (w, h), _ = cv2.minAreaRect(contour)
+            (cx, cy), (w, h), _ = cv2.minAreaRect(contour)
             if w == 0 or h == 0:
                 continue
             long_side, short_side = max(w, h), min(w, h)
-            if not (fid_px * 0.75 <= long_side <= fid_px * 1.3) or area / (w * h) < 0.4:
-                continue
             bx, by, bw, bh = cv2.boundingRect(contour)
             gx, gy = x0 + bx, y0 + by
+            gcx, gcy = x0 + cx, y0 + cy
             touches_border = (
                 gx <= border_margin
                 or (gx + bw) >= img_w - border_margin
                 or gy <= border_margin
                 or (gy + bh) >= img_h - border_margin
             )
+            touches_image_edge = (
+                gx <= 2 or gy <= 2 or (gx + bw) >= img_w - 2 or (gy + bh) >= img_h - 2
+            )
+
+            reasons: list[str] = []
+            if area < 150:
+                reasons.append(f"area({area:.0f}<150)")
+            if not (fid_px * 0.75 <= long_side <= fid_px * 1.3):
+                reasons.append(f"shape(long_side={long_side:.1f})")
+            if area / (w * h) < 0.4:
+                reasons.append(f"area_ratio({area / (w * h):.2f}<0.40)")
             if not touches_border and short_side / long_side < 0.75:
-                continue
-            window_count += 1
+                reasons.append(f"shape(short/long={short_side / long_side:.2f}<0.75)")
+
+            if not reasons:
+                window_count += 1
+            else:
+                if touches_image_edge or touches_border:
+                    reasons.append("touches_image_border")
+                dist_sq = (gcx - corner_x) ** 2 + (gcy - corner_y) ** 2
+                if dist_sq <= (fid_px * 3.5) ** 2 and (
+                    closest_rejected is None or dist_sq < closest_rejected[0]
+                ):
+                    closest_rejected = (dist_sq, reasons)
+
         counts.append(window_count)
-    return counts
+        if window_count > 0:
+            report[name] = f"found({window_count})"
+        elif closest_rejected is not None:
+            report[name] = f"rejected({'+'.join(closest_rejected[1])})"
+        else:
+            report[name] = "rejected(no_contour_near_corner/touches_image_border)"
+    return counts, report
 
 
 def main() -> None:
@@ -123,6 +166,9 @@ def main() -> None:
     args = parser.parse_args()
 
     failures_dir = Path(get_settings().autograde_data_dir) / "read_check_failures"
+    bucket_totals: Counter[str] = Counter()
+    bucket_failures: Counter[str] = Counter()
+    max_observed_angle = 0.0
 
     for template in TEMPLATES:
         total_questions = 0
@@ -134,18 +180,29 @@ def main() -> None:
 
         for seed in range(args.seeds):
             sheet = generate_synthetic_sheet(template, seed=seed)
+            abs_angle = abs(sheet.scan_artifacts.angle_deg) if sheet.scan_artifacts else 0.0
+            max_observed_angle = max(max_observed_angle, abs_angle)
+            bucket_label = next(
+                label
+                for label, lo, hi in ANGLE_BUCKETS
+                if lo <= abs_angle < hi or (hi == 5.0 and abs_angle <= hi)
+            )
+            bucket_totals[bucket_label] += 1
+
             try:
                 aligned = align_scan(sheet.image, template)
             except ScanAlignmentError as exc:
                 failed_sheets += 1
+                bucket_failures[bucket_label] += 1
                 failures_dir.mkdir(parents=True, exist_ok=True)
                 out_path = failures_dir / f"{template.template_id}_seed_{seed}.png"
                 cv2.imwrite(str(out_path), sheet.image)
-                cand_counts = count_fiducial_candidates(sheet.image)
+                cand_counts, corner_report = inspect_corners(sheet.image)
+                corners_str = " ".join(f"{k}:{v}" for k, v in corner_report.items())
                 print(
                     f"FAILED template={template.template_id} seed={seed} "
                     f"saved={out_path} fiducial_candidates={sum(cand_counts)}{cand_counts} "
-                    f"artifacts={sheet.scan_artifacts} error={exc}"
+                    f"corners=[{corners_str}] artifacts={sheet.scan_artifacts} error={exc}"
                 )
                 continue
 
@@ -174,6 +231,17 @@ def main() -> None:
             f"SUMMARY template={template.template_id} sheets={args.seeds} "
             f"failed_sheets={failed_sheets} questions={total_questions} mismatches={mismatches}"
         )
+
+    print(
+        f"\nANGLE_FAILURES generator_max_angle_deg={GENERATOR_MAX_ANGLE_DEG} "
+        f"max_observed_angle_deg={max_observed_angle:.3f}"
+    )
+    print(f"{'bucket_deg':<12} {'sheets':>8} {'failed':>8} {'fail_rate':>10}")
+    for label, _, _ in ANGLE_BUCKETS:
+        total = bucket_totals[label]
+        failed = bucket_failures[label]
+        rate = f"{(failed / total) * 100.0:.1f}%" if total else "0.0%"
+        print(f"{label:<12} {total:>8} {failed:>8} {rate:>10}")
 
 
 if __name__ == "__main__":
