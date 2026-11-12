@@ -177,6 +177,11 @@ def main() -> None:
         by_kind: dict[QuestionMarkKind, Counter[str]] = {
             kind: Counter() for kind in MARK_KIND_ORDER
         }
+        ratios_by_kind: dict[QuestionMarkKind, list[float]] = {
+            QuestionMarkKind.BLANK: [],
+            QuestionMarkKind.LIGHT: [],
+            QuestionMarkKind.PERFECT: [],
+        }
 
         for seed in range(args.seeds):
             sheet = generate_synthetic_sheet(template, seed=seed)
@@ -211,6 +216,12 @@ def main() -> None:
                 total_questions += 1
                 fill = fills[plan.question_number]
                 by_kind[plan.mark_kind][fill.result.value] += 1
+                if plan.mark_kind in ratios_by_kind:
+                    if plan.mark_kind == QuestionMarkKind.BLANK:
+                        ratio = max(bf.fill_ratio for _, bf in fill.bubble_fills)
+                    else:
+                        ratio = dict(fill.bubble_fills)[plan.marked_choices[0]].fill_ratio
+                    ratios_by_kind[plan.mark_kind].append(ratio)
                 if not matches_plan(plan, fill):
                     mismatches += 1
                     actual = f"{fill.result.value}({','.join(fill.marked_choices)})"
@@ -226,6 +237,14 @@ def main() -> None:
             total = sum(counts.values())
             breakdown = ",".join(f"{res}:{cnt}" for res, cnt in sorted(counts.items()))
             kind_parts.append(f"{kind.value}={total}({breakdown})")
+        for kind in (QuestionMarkKind.BLANK, QuestionMarkKind.LIGHT, QuestionMarkKind.PERFECT):
+            arr = np.array(ratios_by_kind[kind])
+            p_min, p10, p50, p90, p_max = np.percentile(arr, [0, 10, 50, 90, 100])
+            print(
+                f"FILL_RATIOS template={template.template_id} kind={kind.value:<7} "
+                f"n={len(arr):<4} min={p_min:.4f} p10={p10:.4f} p50={p50:.4f} "
+                f"p90={p90:.4f} max={p_max:.4f}"
+            )
         print(f"MARK_KINDS template={template.template_id} " + " ".join(kind_parts))
         print(
             f"SUMMARY template={template.template_id} sheets={args.seeds} "
