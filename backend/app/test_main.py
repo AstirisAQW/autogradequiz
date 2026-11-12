@@ -10,10 +10,17 @@ import pytest
 
 from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import TWENTY_QUESTIONS
+from app.bubble_grading.classifier import QuestionOutcome, classify_sheet, score_sheet
 from app.db.connection import init_db
 from app.main import app
-from app.sheet_rendering.renderer import blank_canvas, render_sheet
+from app.sheet_rendering.renderer import (
+    blank_canvas,
+    bubble_position_px,
+    bubble_radius_px,
+    render_sheet,
+)
 from app.synthetic_sheets.generator import generate_synthetic_sheet
+from app.synthetic_sheets.mark_drawing import draw_perfect_mark
 from app.synthetic_sheets.question_plan import QuestionMarkKind
 
 try:
@@ -430,6 +437,61 @@ def test_ungraded_scan_appears_pending_and_csv_escapes_formulas():
 
     rows = list(csv.reader(io.StringIO(client.get(f"/batches/{batch_id}/export.csv").text)))
     assert rows[1][0] == "'=1+1"
+
+
+def test_trace_ambiguous_flows_through_scoring_review_corrections_and_csv():
+    import csv
+    import io
+
+    client = TestClient(app)
+    answer_key = ["A", "B"] + ["C"] * 18
+    canvas = render_sheet(TWENTY_QUESTIONS, page=PAGE)
+    radius_px = bubble_radius_px(TWENTY_QUESTIONS, PAGE)
+    # Q1: faint trace on the correct letter "A"; Q2: solid mark on the correct letter "B".
+    cv2.circle(
+        canvas,
+        bubble_position_px(TWENTY_QUESTIONS, 1, 0, PAGE),
+        radius_px,
+        (180, 180, 180),
+        -1,
+    )
+    draw_perfect_mark(canvas, bubble_position_px(TWENTY_QUESTIONS, 2, 1, PAGE), radius_px)
+
+    summary = score_sheet(classify_sheet(canvas, TWENTY_QUESTIONS, PAGE), answer_key)
+    assert summary.question_outcomes[1] == QuestionOutcome.AMBIGUOUS
+    assert summary.correct_count == 1
+    assert summary.wrong_count == 0
+    assert summary.ambiguous_count == 1
+
+    test_id = client.post(
+        "/tests",
+        json={"name": "Trace Quiz", "template_id": "20q_a4", "answer_key": answer_key},
+    ).json()["id"]
+    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
+    scan_id = client.post(
+        f"/batches/{batch_id}/scans",
+        files={"file": ("trace.png", _encode_png(canvas), "image/png")},
+    ).json()["id"]
+
+    graded = client.post(f"/scans/{scan_id}/grade").json()
+    assert graded["score"] == 5.0
+    assert graded["needs_review"] is True
+    assert json.loads(graded["answers_json"])[:3] == ["A", "B", ""]
+    assert json.loads(graded["flags_json"]) == {"ambiguous": [1], "multiple": []}
+
+    rows_before = list(csv.reader(io.StringIO(client.get(f"/batches/{batch_id}/export.csv").text)))
+    assert rows_before[1][3:8] == ["5.0", "True", "A", "B", ""]
+
+    updated = client.patch(
+        f"/scans/{scan_id}/corrections",
+        json={"corrections": {"1": "A"}},
+    ).json()
+    assert updated["score"] == 10.0
+    assert updated["needs_review"] is False
+
+    rows_after = list(csv.reader(io.StringIO(client.get(f"/batches/{batch_id}/export.csv").text)))
+    assert rows_after[1][3:8] == ["10.0", "False", "A", "B", ""]
+
 
 
 
