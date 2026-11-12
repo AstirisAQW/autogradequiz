@@ -337,15 +337,14 @@ def test_patch_identity_and_preserve_hand_edited_identity_on_regrade():
 
 def test_marked_sheet_score_and_correction_end_to_end():
     client = TestClient(app)
-    answer_key = ["A", "B", "C", "D"] * 5
-    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=2, answer_key=answer_key)
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=12)
 
     test_id = client.post(
         "/tests",
         json={
             "name": "End-to-End Quiz",
             "template_id": TWENTY_QUESTIONS.template_id,
-            "answer_key": answer_key,
+            "answer_key": sheet.answer_key,
         },
     ).json()["id"]
     batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
@@ -365,7 +364,7 @@ def test_marked_sheet_score_and_correction_end_to_end():
         1
         for plan in sheet.question_plans
         if plan.mark_kind in filled_kinds
-        and plan.marked_choices == (answer_key[plan.question_number - 1],)
+        and plan.marked_choices == (plan.correct_choice,)
     )
     expected_score = (expected_correct / len(sheet.question_plans)) * 100.0
     assert result["score"] == expected_score
@@ -383,7 +382,7 @@ def test_marked_sheet_score_and_correction_end_to_end():
 
     patch_resp = client.patch(
         f"/scans/{scan_id}/corrections",
-        json={"corrections": {str(flagged_q): answer_key[flagged_q - 1]}},
+        json={"corrections": {str(flagged_q): sheet.answer_key[flagged_q - 1]}},
     )
     assert patch_resp.status_code == 200
     updated = patch_resp.json()
