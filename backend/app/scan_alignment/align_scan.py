@@ -4,9 +4,13 @@ import cv2
 import numpy as np
 
 from app.answer_sheet_templates.builder import FIDUCIAL_MARGIN_MM, PAGE
-from app.answer_sheet_templates.geometry import FIDUCIAL_SIZE_MM, PageSize
+from app.answer_sheet_templates.geometry import (
+    FIDUCIAL_SIZE_MM,
+    PageSize,
+    mm_length_to_px,
+    mm_to_px,
+)
 from app.answer_sheet_templates.layout_spec import TemplateSpec
-from app.sheet_rendering.renderer import mm_length_to_px, mm_to_px
 
 ROTATIONS = (
     None,

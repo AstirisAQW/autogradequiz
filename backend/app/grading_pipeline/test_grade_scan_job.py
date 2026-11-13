@@ -8,7 +8,12 @@ from app.answer_sheet_templates.catalog import (
     HUNDRED_QUESTIONS,
     TWENTY_QUESTIONS,
 )
-from app.answer_sheet_templates.geometry import ANSWER_CHOICES
+from app.answer_sheet_templates.geometry import (
+    ANSWER_CHOICES,
+    bubble_position_px,
+    bubble_radius_px,
+    mm_to_px,
+)
 from app.bubble_grading.classifier import classify_sheet
 from app.bubble_grading.scoring import score_sheet
 from app.db import repositories
@@ -17,7 +22,7 @@ from app.db.records import NewBatch, NewScanJob, NewTest
 from app.grading_pipeline.exceptions import ScanImageUnreadableError, ScanJobAlreadyGradedError
 from app.grading_pipeline.grade_scan_job import grade_scan_job, scan_job_needs_review
 from app.scan_alignment.align_scan import ScanAlignmentError, align_scan
-from app.sheet_rendering.renderer import blank_canvas, bubble_radius_px, mm_to_px, render_sheet
+from app.sheet_rendering.renderer import blank_canvas, render_sheet
 from app.synthetic_sheets.generator import generate_synthetic_sheet
 from app.synthetic_sheets.mark_drawing import draw_marks_for_plan
 from app.synthetic_sheets.question_plan import generate_answer_key, generate_question_plans
@@ -354,7 +359,6 @@ def test_apply_scan_corrections_empty_matches_score_sheet_and_needs_review(tmp_p
 def test_apply_scan_corrections_flagged_question_matches_manual_recalculation(tmp_path):
     import json
 
-    from app.sheet_rendering.renderer import bubble_position_px
     from app.synthetic_sheets.mark_drawing import draw_perfect_mark
 
     answer_key = generate_answer_key(TWENTY_QUESTIONS.question_count, np.random.default_rng(7))

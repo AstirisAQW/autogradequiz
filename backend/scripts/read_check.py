@@ -13,11 +13,15 @@ from app.answer_sheet_templates.catalog import (
     HUNDRED_QUESTIONS,
     TWENTY_QUESTIONS,
 )
-from app.answer_sheet_templates.geometry import FIDUCIAL_SIZE_MM, PageSize
+from app.answer_sheet_templates.geometry import (
+    FIDUCIAL_SIZE_MM,
+    PageSize,
+    mm_length_to_px,
+    mm_to_px,
+)
 from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_sheet
 from app.config import get_settings
 from app.scan_alignment.align_scan import ScanAlignmentError, align_scan, marker_long_side_ok
-from app.sheet_rendering.renderer import mm_length_to_px, mm_to_px
 from app.synthetic_sheets.generator import generate_synthetic_sheet
 from app.synthetic_sheets.question_plan import QuestionMarkKind, QuestionPlan
 

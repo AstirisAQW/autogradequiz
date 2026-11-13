@@ -4,7 +4,7 @@ import numpy as np
 
 from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import TWENTY_QUESTIONS
-from app.sheet_rendering.renderer import mm_to_px
+from app.answer_sheet_templates.geometry import mm_to_px
 from app.synthetic_sheets.generator import generate_synthetic_sheet
 from app.synthetic_sheets.ground_truth import (
     save_ground_truth,

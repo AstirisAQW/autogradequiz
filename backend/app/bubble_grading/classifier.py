@@ -24,13 +24,14 @@ import cv2
 import numpy as np
 
 from app.answer_sheet_templates.builder import PAGE
-from app.answer_sheet_templates.geometry import ANSWER_CHOICES, PageSize
-from app.answer_sheet_templates.layout_spec import TemplateSpec
-from app.sheet_rendering.renderer import (
+from app.answer_sheet_templates.geometry import (
+    ANSWER_CHOICES,
     BUBBLE_OUTLINE_THICKNESS_PX,
+    PageSize,
     bubble_position_px,
     bubble_radius_px,
 )
+from app.answer_sheet_templates.layout_spec import TemplateSpec
 
 
 class BubbleResult(Enum):

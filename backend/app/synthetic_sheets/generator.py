@@ -16,9 +16,9 @@ from dataclasses import dataclass
 import numpy as np
 
 from app.answer_sheet_templates.builder import PAGE
-from app.answer_sheet_templates.geometry import PageSize
+from app.answer_sheet_templates.geometry import PageSize, bubble_radius_px
 from app.answer_sheet_templates.layout_spec import TemplateSpec
-from app.sheet_rendering.renderer import bubble_radius_px, render_sheet
+from app.sheet_rendering.renderer import render_sheet
 from app.synthetic_sheets.mark_drawing import draw_marks_for_plan
 from app.synthetic_sheets.question_plan import QuestionPlan, generate_question_plans
 from app.synthetic_sheets.scan_artifacts import ScanArtifacts, apply_scan_artifacts

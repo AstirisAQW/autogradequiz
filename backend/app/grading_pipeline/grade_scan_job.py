@@ -16,7 +16,7 @@ import pytesseract
 
 from app.answer_sheet_templates.builder import DEFAULT_TEXT_FIELDS, PAGE
 from app.answer_sheet_templates.catalog import get_template_spec
-from app.answer_sheet_templates.geometry import PageSize
+from app.answer_sheet_templates.geometry import PageSize, mm_to_px
 from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_sheet
 from app.bubble_grading.scoring import score_sheet
 from app.config import get_settings
@@ -34,7 +34,6 @@ from app.db.repositories import (
 )
 from app.grading_pipeline.exceptions import ScanImageUnreadableError, ScanJobAlreadyGradedError
 from app.scan_alignment.align_scan import align_scan
-from app.sheet_rendering.renderer import mm_to_px
 
 
 def load_scan_image(raw_image_path: str) -> np.ndarray:

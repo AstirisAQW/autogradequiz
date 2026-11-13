@@ -10,14 +10,13 @@ import pytest
 
 from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import TWENTY_QUESTIONS
+from app.answer_sheet_templates.geometry import bubble_position_px, bubble_radius_px
 from app.bubble_grading.classifier import classify_sheet
 from app.bubble_grading.scoring import QuestionOutcome, score_sheet
 from app.db.connection import init_db
 from app.main import app
 from app.sheet_rendering.renderer import (
     blank_canvas,
-    bubble_position_px,
-    bubble_radius_px,
     render_sheet,
 )
 from app.synthetic_sheets.generator import generate_synthetic_sheet
