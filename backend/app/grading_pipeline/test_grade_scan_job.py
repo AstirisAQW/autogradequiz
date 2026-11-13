@@ -9,7 +9,8 @@ from app.answer_sheet_templates.catalog import (
     TWENTY_QUESTIONS,
 )
 from app.answer_sheet_templates.geometry import ANSWER_CHOICES
-from app.bubble_grading.classifier import classify_sheet, score_sheet
+from app.bubble_grading.classifier import classify_sheet
+from app.bubble_grading.scoring import score_sheet
 from app.db import repositories
 from app.db.connection import init_db
 from app.db.records import NewBatch, NewScanJob, NewTest

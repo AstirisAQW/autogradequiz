@@ -10,7 +10,8 @@ import pytest
 
 from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import TWENTY_QUESTIONS
-from app.bubble_grading.classifier import QuestionOutcome, classify_sheet, score_sheet
+from app.bubble_grading.classifier import classify_sheet
+from app.bubble_grading.scoring import QuestionOutcome, score_sheet
 from app.db.connection import init_db
 from app.main import app
 from app.sheet_rendering.renderer import (

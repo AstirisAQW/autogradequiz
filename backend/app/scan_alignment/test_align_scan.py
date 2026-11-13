@@ -5,7 +5,8 @@ import pytest
 from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import FIFTY_QUESTIONS, TWENTY_QUESTIONS
 from app.answer_sheet_templates.geometry import ANSWER_CHOICES
-from app.bubble_grading.classifier import classify_sheet, score_sheet
+from app.bubble_grading.classifier import classify_sheet
+from app.bubble_grading.scoring import score_sheet
 from app.scan_alignment.align_scan import ScanAlignmentError, align_scan
 from app.sheet_rendering.renderer import (
     blank_canvas,

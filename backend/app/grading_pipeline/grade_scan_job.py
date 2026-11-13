@@ -17,7 +17,8 @@ import pytesseract
 from app.answer_sheet_templates.builder import DEFAULT_TEXT_FIELDS, PAGE
 from app.answer_sheet_templates.catalog import get_template_spec
 from app.answer_sheet_templates.geometry import PageSize
-from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_sheet, score_sheet
+from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_sheet
+from app.bubble_grading.scoring import score_sheet
 from app.config import get_settings
 from app.db.exceptions import ScanResultNotFoundError
 from app.db.records import NewScanResult, ScanResultRecord
