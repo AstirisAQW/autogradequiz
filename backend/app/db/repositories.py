@@ -148,16 +148,6 @@ def get_scan_job(scan_job_id: int) -> ScanJobRecord:
     return _scan_job_from_row(row)
 
 
-def list_scan_jobs_for_batch(batch_id: int) -> list[ScanJobRecord]:
-    """Return every scan job belonging to a batch, oldest first."""
-    with get_connection() as connection:
-        rows = connection.execute(
-            "SELECT * FROM scan_jobs WHERE batch_id = ? ORDER BY created_at ASC",
-            (batch_id,),
-        ).fetchall()
-    return [_scan_job_from_row(row) for row in rows]
-
-
 def list_pending_scan_jobs() -> list[ScanJobRecord]:
     """Return every scan job still waiting to be graded, oldest first."""
     with get_connection() as connection:

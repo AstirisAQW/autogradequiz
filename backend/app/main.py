@@ -22,19 +22,6 @@ from app.grading_pipeline.exceptions import (
 from app.routers import batches_router, review_router, scans_router, tests_router
 from app.scan_alignment.align_scan import ScanAlignmentError
 
-NOT_FOUND_EXCEPTIONS = (
-    TestNotFoundError,
-    BatchNotFoundError,
-    ScanJobNotFoundError,
-    ScanResultNotFoundError,
-)
-UNPROCESSABLE_EXCEPTIONS = (
-    InvalidTestError,
-    UnknownTemplateError,
-    ScanImageUnreadableError,
-    ScanAlignmentError,
-)
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
