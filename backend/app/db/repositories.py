@@ -181,18 +181,18 @@ def update_scan_job_status(scan_job_id: int, status: str) -> ScanJobRecord:
 
 def _scan_result_from_row(row: sqlite3.Row) -> ScanResultRecord:
     return ScanResultRecord(
-        id=row["id"],
+        id=row["id"] or 0,
         scan_job_id=row["scan_job_id"],
-        name_text=row["name_text"],
-        date_text=row["date_text"],
-        section_text=row["section_text"],
-        score=row["score"],
-        answers_json=row["answers_json"],
-        flags_json=row["flags_json"],
+        name_text=row["name_text"] or "",
+        date_text=row["date_text"] or "",
+        section_text=row["section_text"] or "",
+        score=row["score"] or 0.0,
+        answers_json=row["answers_json"] or "[]",
+        flags_json=row["flags_json"] or "{}",
         needs_review=bool(row["needs_review"]),
-        processed_image_path=row["processed_image_path"],
-        error_message=row["error_message"],
-        created_at=row["created_at"],
+        processed_image_path=row["processed_image_path"] or "",
+        error_message=row["error_message"] or "",
+        created_at=row["created_at"] or "",
         status=row["status"],
     )
 
@@ -270,15 +270,17 @@ def get_scan_result(scan_job_id: int) -> ScanResultRecord:
 
 
 def list_scan_results_for_batch(batch_id: int) -> list[ScanResultRecord]:
-    """Return every scan result belonging to a batch, oldest first."""
+    """Return one result entry per scan job in a batch, oldest first."""
     get_batch(batch_id)
     with get_connection() as connection:
         rows = connection.execute(
             """
-            SELECT scan_results.*, scan_jobs.status AS status FROM scan_results
-            JOIN scan_jobs ON scan_jobs.id = scan_results.scan_job_id
+            SELECT COALESCE(scan_results.scan_job_id, scan_jobs.id) AS scan_job_id,
+                   scan_results.*, scan_jobs.status AS status
+            FROM scan_jobs
+            LEFT JOIN scan_results ON scan_results.scan_job_id = scan_jobs.id
             WHERE scan_jobs.batch_id = ?
-            ORDER BY scan_results.created_at ASC
+            ORDER BY scan_jobs.created_at ASC, scan_jobs.id ASC
             """,
             (batch_id,),
         ).fetchall()

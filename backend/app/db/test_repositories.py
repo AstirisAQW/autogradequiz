@@ -152,6 +152,19 @@ def test_save_scan_result_round_trips_and_flags_for_review():
     assert repositories.list_scan_results_needing_review() == [fetched]
 
 
+def test_list_scan_results_for_batch_includes_ungraded_scan_with_its_job_id():
+    batch = repositories.create_batch(NewBatch(test_id=_create_sample_test().id))
+    scan_job = repositories.create_scan_job(
+        NewScanJob(batch_id=batch.id, raw_image_path="/data/raw/scan_1.jpg")
+    )
+
+    [result] = repositories.list_scan_results_for_batch(batch.id)
+
+    assert result.scan_job_id == scan_job.id
+    assert result.status == "pending"
+    assert result.answers_json == "[]"
+
+
 def test_get_scan_result_raises_for_unknown_scan_job():
     with pytest.raises(ScanResultNotFoundError):
         repositories.get_scan_result(999)

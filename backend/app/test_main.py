@@ -10,10 +10,18 @@ import pytest
 
 from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import TWENTY_QUESTIONS
+from app.bubble_grading.classifier import QuestionOutcome, classify_sheet, score_sheet
 from app.db.connection import init_db
 from app.main import app
-from app.sheet_rendering.renderer import blank_canvas, render_sheet
+from app.sheet_rendering.renderer import (
+    blank_canvas,
+    bubble_position_px,
+    bubble_radius_px,
+    render_sheet,
+)
 from app.synthetic_sheets.generator import generate_synthetic_sheet
+from app.synthetic_sheets.mark_drawing import draw_perfect_mark
+from app.synthetic_sheets.question_plan import QuestionMarkKind
 
 try:
     from fastapi.testclient import TestClient
@@ -332,5 +340,159 @@ def test_patch_identity_and_preserve_hand_edited_identity_on_regrade():
     assert regraded["name_text"] == "Alice Kim"
     assert regraded["date_text"] == "2026-11-09"
     assert regraded["section_text"] == "4A"
+
+
+def test_marked_sheet_score_and_correction_end_to_end():
+    client = TestClient(app)
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1128)
+
+    test_id = client.post(
+        "/tests",
+        json={
+            "name": "End-to-End Quiz",
+            "template_id": TWENTY_QUESTIONS.template_id,
+            "answer_key": sheet.answer_key,
+        },
+    ).json()["id"]
+    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
+
+    scan_id = client.post(
+        f"/batches/{batch_id}/scans",
+        files={"file": ("marked.png", _encode_png(sheet.image), "image/png")},
+    ).json()["id"]
+    assert client.post(f"/scans/{scan_id}/grade").status_code == 200
+
+    results = client.get(f"/batches/{batch_id}/results").json()
+    assert len(results) == 1
+    result = results[0]
+
+    filled_kinds = {QuestionMarkKind.PERFECT, QuestionMarkKind.OFF_CENTER}
+    expected_correct = sum(
+        1
+        for plan in sheet.question_plans
+        if plan.mark_kind in filled_kinds
+        and plan.marked_choices == (plan.correct_choice,)
+    )
+    expected_score = (expected_correct / len(sheet.question_plans)) * 100.0
+    assert result["score"] == expected_score
+    assert result["needs_review"] is True
+
+    answers = json.loads(result["answers_json"])
+    for plan in sheet.question_plans:
+        if plan.mark_kind == QuestionMarkKind.PERFECT:
+            assert answers[plan.question_number - 1] == plan.marked_choices[0]
+
+    flags = json.loads(result["flags_json"])
+    flagged_questions = flags["ambiguous"] + flags["multiple"]
+    assert len(flagged_questions) == 1
+    flagged_q = flagged_questions[0]
+
+    patch_resp = client.patch(
+        f"/scans/{scan_id}/corrections",
+        json={"corrections": {str(flagged_q): sheet.answer_key[flagged_q - 1]}},
+    )
+    assert patch_resp.status_code == 200
+    updated = patch_resp.json()
+    assert updated["score"] == ((expected_correct + 1) / len(sheet.question_plans)) * 100.0
+    assert updated["needs_review"] is False
+
+
+def test_ungraded_scan_appears_pending_and_csv_escapes_formulas():
+    import csv
+    import io
+
+    client = TestClient(app)
+    test_id = client.post(
+        "/tests",
+        json={"name": "Quiz", "template_id": "20q_a4", "answer_key": ["A"] * 20},
+    ).json()["id"]
+    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
+
+    ungraded = client.post(
+        f"/batches/{batch_id}/scans",
+        files={
+            "file": (
+                "sheet.png",
+                _encode_png(render_sheet(TWENTY_QUESTIONS, page=PAGE)),
+                "image/png",
+            )
+        },
+    ).json()
+
+    results = client.get(f"/batches/{batch_id}/results").json()
+    assert len(results) == 1
+    assert results[0]["scan_job_id"] == ungraded["id"]
+    assert results[0]["status"] == "pending"
+    assert results[0]["score"] == 0.0
+    assert results[0]["answers_json"] == "[]"
+
+    assert client.post(f"/scans/{ungraded['id']}/grade").status_code == 200
+    assert (
+        client.patch(
+            f"/scans/{ungraded['id']}/identity",
+            json={"name_text": "=1+1"},
+        ).status_code
+        == 200
+    )
+
+    rows = list(csv.reader(io.StringIO(client.get(f"/batches/{batch_id}/export.csv").text)))
+    assert rows[1][0] == "'=1+1"
+
+
+def test_trace_ambiguous_flows_through_scoring_review_corrections_and_csv():
+    import csv
+    import io
+
+    client = TestClient(app)
+    answer_key = ["A", "B"] + ["C"] * 18
+    canvas = render_sheet(TWENTY_QUESTIONS, page=PAGE)
+    radius_px = bubble_radius_px(TWENTY_QUESTIONS, PAGE)
+    # Q1: faint trace on the correct letter "A"; Q2: solid mark on the correct letter "B".
+    cv2.circle(
+        canvas,
+        bubble_position_px(TWENTY_QUESTIONS, 1, 0, PAGE),
+        radius_px,
+        (180, 180, 180),
+        -1,
+    )
+    draw_perfect_mark(canvas, bubble_position_px(TWENTY_QUESTIONS, 2, 1, PAGE), radius_px)
+
+    summary = score_sheet(classify_sheet(canvas, TWENTY_QUESTIONS, PAGE), answer_key)
+    assert summary.question_outcomes[1] == QuestionOutcome.AMBIGUOUS
+    assert summary.correct_count == 1
+    assert summary.wrong_count == 0
+    assert summary.ambiguous_count == 1
+
+    test_id = client.post(
+        "/tests",
+        json={"name": "Trace Quiz", "template_id": "20q_a4", "answer_key": answer_key},
+    ).json()["id"]
+    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
+    scan_id = client.post(
+        f"/batches/{batch_id}/scans",
+        files={"file": ("trace.png", _encode_png(canvas), "image/png")},
+    ).json()["id"]
+
+    graded = client.post(f"/scans/{scan_id}/grade").json()
+    assert graded["score"] == 5.0
+    assert graded["needs_review"] is True
+    assert json.loads(graded["answers_json"])[:3] == ["A", "B", ""]
+    assert json.loads(graded["flags_json"]) == {"ambiguous": [1], "multiple": []}
+
+    rows_before = list(csv.reader(io.StringIO(client.get(f"/batches/{batch_id}/export.csv").text)))
+    assert rows_before[1][3:8] == ["5.0", "True", "A", "B", ""]
+
+    updated = client.patch(
+        f"/scans/{scan_id}/corrections",
+        json={"corrections": {"1": "A"}},
+    ).json()
+    assert updated["score"] == 10.0
+    assert updated["needs_review"] is False
+
+    rows_after = list(csv.reader(io.StringIO(client.get(f"/batches/{batch_id}/export.csv").text)))
+    assert rows_after[1][3:8] == ["10.0", "False", "A", "B", ""]
+
+
+
 
 

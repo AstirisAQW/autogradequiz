@@ -21,7 +21,7 @@ from app.answer_sheet_templates.layout_spec import TemplateSpec
 from app.sheet_rendering.renderer import bubble_radius_px, render_sheet
 from app.synthetic_sheets.mark_drawing import draw_marks_for_plan
 from app.synthetic_sheets.question_plan import QuestionPlan, generate_question_plans
-from app.synthetic_sheets.scan_artifacts import apply_scan_artifacts
+from app.synthetic_sheets.scan_artifacts import ScanArtifacts, apply_scan_artifacts
 from app.synthetic_sheets.stray_marks import (
     STRAY_MARK_MAX_COUNT,
     STRAY_MARK_MIN_COUNT,
@@ -36,6 +36,7 @@ class SyntheticSheet:
     question_plans: tuple[QuestionPlan, ...]
     stray_mark_count: int
     image: np.ndarray
+    scan_artifacts: ScanArtifacts | None = None
 
     @property
     def answer_key(self) -> list[str]:
@@ -71,7 +72,7 @@ def generate_synthetic_sheet(
     stray_mark_count = int(rng.integers(STRAY_MARK_MIN_COUNT, STRAY_MARK_MAX_COUNT))
     draw_stray_marks(canvas, page, stray_mark_count, rng)
 
-    image = apply_scan_artifacts(canvas, rng)
+    image, scan_artifacts = apply_scan_artifacts(canvas, rng)
 
     return SyntheticSheet(
         seed=seed,
@@ -79,4 +80,5 @@ def generate_synthetic_sheet(
         question_plans=question_plans,
         stray_mark_count=stray_mark_count,
         image=image,
+        scan_artifacts=scan_artifacts,
     )

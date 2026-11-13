@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from app.answer_sheet_templates.builder import PAGE
-from app.answer_sheet_templates.catalog import TWENTY_QUESTIONS
+from app.answer_sheet_templates.catalog import FIFTY_QUESTIONS, TWENTY_QUESTIONS
 from app.answer_sheet_templates.geometry import ANSWER_CHOICES
 from app.bubble_grading.classifier import classify_sheet, score_sheet
 from app.scan_alignment.align_scan import ScanAlignmentError, align_scan
@@ -13,6 +13,7 @@ from app.sheet_rendering.renderer import (
     bubble_radius_px,
     render_sheet,
 )
+from app.synthetic_sheets.generator import generate_synthetic_sheet
 from app.synthetic_sheets.mark_drawing import draw_marks_for_plan, draw_perfect_mark
 from app.synthetic_sheets.question_plan import generate_answer_key, generate_question_plans
 from app.synthetic_sheets.scan_artifacts import (
@@ -100,5 +101,44 @@ def test_align_scan_grades_100_on_90_degree_rotated_sheet():
     summary = score_sheet(classify_sheet(aligned, TWENTY_QUESTIONS), answer_key)
 
     assert summary.score_fraction * 100 == 100.0
+
+
+def test_align_scan_aligns_sheet_at_5_degrees_rotation():
+    rng = np.random.default_rng(41)
+    answer_key = generate_answer_key(TWENTY_QUESTIONS.question_count, rng)
+    sheet = _fully_marked_sheet_for_key(answer_key)
+    height, width = sheet.shape[:2]
+
+    rot_matrix = cv2.getRotationMatrix2D((width / 2, height / 2), 5.0, 1.0)
+    rotated_5 = cv2.warpAffine(
+        sheet,
+        rot_matrix,
+        (width, height),
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(255, 255, 255),
+    )
+
+    aligned = align_scan(rotated_5, TWENTY_QUESTIONS)
+    summary = score_sheet(classify_sheet(aligned, TWENTY_QUESTIONS), answer_key)
+
+    assert summary.score_fraction * 100 == 100.0
+
+
+@pytest.mark.parametrize(
+    ("template", "seed"),
+    [
+        (TWENTY_QUESTIONS, 21),
+        (TWENTY_QUESTIONS, 26),
+        (FIFTY_QUESTIONS, 2),
+        (FIFTY_QUESTIONS, 12),
+        (FIFTY_QUESTIONS, 34),
+    ],
+)
+def test_align_scan_aligns_border_clipped_synthetic_seeds(template, seed):
+    sheet = generate_synthetic_sheet(template, seed=seed)
+    aligned = align_scan(sheet.image, template)
+
+    assert aligned.shape == sheet.image.shape
+
 
 

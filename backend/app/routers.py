@@ -90,6 +90,10 @@ def list_batch_results_endpoint(batch_id: int) -> list[ScanResultRecord]:
     return repositories.list_scan_results_for_batch(batch_id)
 
 
+def _escape_csv_cell(value: str) -> str:
+    return f"'{value}" if value.startswith(("=", "+", "-", "@")) else value
+
+
 @batches_router.get("/{batch_id}/export.csv")
 def export_batch_csv_endpoint(batch_id: int) -> Response:
     batch = repositories.get_batch(batch_id)
@@ -117,12 +121,12 @@ def export_batch_csv_endpoint(batch_id: int) -> Response:
         ]
         writer.writerow(
             [
-                result.name_text,
-                result.date_text,
-                result.section_text,
+                _escape_csv_cell(result.name_text),
+                _escape_csv_cell(result.date_text),
+                _escape_csv_cell(result.section_text),
                 result.score,
                 result.needs_review,
-                *answers,
+                *(_escape_csv_cell(a) for a in answers),
             ]
         )
     return Response(content=buf.getvalue(), media_type="text/csv")

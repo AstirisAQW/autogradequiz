@@ -27,7 +27,11 @@ import numpy as np
 from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.geometry import ANSWER_CHOICES, PageSize
 from app.answer_sheet_templates.layout_spec import TemplateSpec
-from app.sheet_rendering.renderer import bubble_position_px, bubble_radius_px
+from app.sheet_rendering.renderer import (
+    BUBBLE_OUTLINE_THICKNESS_PX,
+    bubble_position_px,
+    bubble_radius_px,
+)
 
 
 class BubbleResult(Enum):
@@ -72,6 +76,10 @@ class ClassifierThresholds:
         gray, meaningfully darker than blank paper but much lighter than real ink) with
         room to spare, or every bubble -- marked or not -- would register a baseline
         fill_ratio just from its own outline.
+    trace_dark_offset: gentler darkness offset below local white used only on the inner
+        disc (inside the printed outline) to detect faint pencil traces.
+    trace_min_ratio: minimum inner-disc fraction at trace_dark_offset for an otherwise
+        blank bubble to count as a trace and promote a BLANK question to AMBIGUOUS.
     """
 
     mask_widen_fraction: float = 0.18
@@ -80,6 +88,8 @@ class ClassifierThresholds:
     local_patch_radius_multiplier: float = 2.0
     background_sample_radius_multiplier: float = 1.6
     dark_offset: float = 90.0
+    trace_dark_offset: float = 50.0
+    trace_min_ratio: float = 0.35
 
 
 DEFAULT_THRESHOLDS = ClassifierThresholds()
@@ -96,6 +106,7 @@ class BubbleFill:
 
     fill_ratio: float
     result: BubbleResult
+    trace_ratio: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -181,32 +192,6 @@ def _background_level(
     return float(np.median(background_pixels))
 
 
-def _local_dark_threshold(
-    patch: np.ndarray,
-    patch_center: tuple[int, int],
-    widened_radius_px_value: int,
-    thresholds: ClassifierThresholds,
-) -> float:
-    """This bubble's own dark/light cutoff, anchored to this bubble's own paper color.
-
-    Using a per-bubble threshold instead of one BLANK_THRESHOLD for the whole sheet means
-    a shadow across one corner of the page doesn't push every bubble in that corner
-    toward the wrong class -- each bubble is judged against the paper right around it.
-
-    The cutoff sits a fixed distance below that local white level rather than at a split
-    found by histogram search: a printed bubble outline blurred by scanning is a soft,
-    partial-intensity edge, not a solid dark shape, and histogram-based thresholds can
-    mistake that blur for its own cluster and count it as ink. Fixed-offset-from-white
-    doesn't have that failure mode, as long as the offset comfortably clears the
-    outline's own (much smaller) darkness relative to blank paper.
-    """
-    sample_radius = int(
-        round(widened_radius_px_value * thresholds.background_sample_radius_multiplier)
-    )
-    background_level = _background_level(patch, patch_center, sample_radius)
-    return background_level - thresholds.dark_offset
-
-
 def _bucket_fill_ratio(fill_ratio: float, thresholds: ClassifierThresholds) -> BubbleResult:
     if fill_ratio <= thresholds.blank_max_ratio:
         return BubbleResult.BLANK
@@ -228,26 +213,66 @@ def classify_bubble(
     mask = circular_mask(patch.shape, patch_center, widened_radius)
     mask_pixel_count = int(mask.sum())
     if mask_pixel_count == 0:
-        return BubbleFill(fill_ratio=0.0, result=BubbleResult.BLANK)
+        return BubbleFill(fill_ratio=0.0, result=BubbleResult.BLANK, trace_ratio=0.0)
 
-    dark_threshold = _local_dark_threshold(patch, patch_center, widened_radius, thresholds)
+    sample_radius = int(
+        round(widened_radius * thresholds.background_sample_radius_multiplier)
+    )
+    # Cutoffs sit a fixed distance below this bubble's own local white level, so a shadow
+    # across part of the page doesn't shift every bubble the same way. A fixed offset is
+    # used instead of a histogram split because a blurred printed outline is a soft edge
+    # that histogram thresholds can mistake for ink.
+    background_level = _background_level(patch, patch_center, sample_radius)
+    dark_threshold = background_level - thresholds.dark_offset
     dark_mask = patch <= dark_threshold
     dark_pixel_count = int(np.count_nonzero(dark_mask & mask))
 
     fill_ratio = dark_pixel_count / mask_pixel_count
-    return BubbleFill(fill_ratio=fill_ratio, result=_bucket_fill_ratio(fill_ratio, thresholds))
+
+    inner_radius = max(radius_px - BUBBLE_OUTLINE_THICKNESS_PX - 1, 0)
+    inner_mask = circular_mask(patch.shape, patch_center, inner_radius)
+    inner_pixel_count = int(inner_mask.sum())
+    if inner_radius == 0 or inner_pixel_count == 0:
+        trace_ratio = 0.0
+    else:
+        trace_threshold = background_level - thresholds.trace_dark_offset
+        trace_dark_count = int(np.count_nonzero((patch <= trace_threshold) & inner_mask))
+        trace_ratio = trace_dark_count / inner_pixel_count
+
+    return BubbleFill(
+        fill_ratio=fill_ratio,
+        result=_bucket_fill_ratio(fill_ratio, thresholds),
+        trace_ratio=trace_ratio,
+    )
 
 
-def aggregate_question_fill(bubble_fills: tuple[tuple[str, BubbleFill], ...]) -> QuestionFill:
+def aggregate_question_fill(
+    bubble_fills: tuple[tuple[str, BubbleFill], ...],
+    thresholds: ClassifierThresholds = DEFAULT_THRESHOLDS,
+) -> QuestionFill:
     """Combine one question's per-choice bubble fills into a single graded result.
 
-    Zero marked bubbles is BLANK. One marked bubble passes through its own class (FILLED
-    for a solid mark, AMBIGUOUS for a partial/light/off-shape one). Two or more marked
-    bubbles is MULTIPLE, regardless of how solidly each one is filled.
+    Zero marked bubbles is BLANK unless at least one bubble has a faint trace, which
+    promotes the question to AMBIGUOUS with the trace choices. One marked bubble passes
+    through its own class (FILLED for a solid mark, AMBIGUOUS for a partial/light/off-shape
+    one). Two or more marked bubbles is MULTIPLE, regardless of how solidly each one is
+    filled.
     """
     marked = [(choice, fill) for choice, fill in bubble_fills if fill.result != BubbleResult.BLANK]
 
     if not marked:
+        traces = [
+            choice
+            for choice, fill in bubble_fills
+            if fill.fill_ratio <= thresholds.blank_max_ratio
+            and fill.trace_ratio >= thresholds.trace_min_ratio
+        ]
+        if traces:
+            return QuestionFill(
+                result=BubbleResult.AMBIGUOUS,
+                marked_choices=tuple(traces),
+                bubble_fills=bubble_fills,
+            )
         result = BubbleResult.BLANK
     elif len(marked) == 1:
         result = marked[0][1].result
@@ -281,7 +306,7 @@ def classify_question(
         )
         for choice_index, choice in enumerate(ANSWER_CHOICES)
     )
-    return aggregate_question_fill(bubble_fills)
+    return aggregate_question_fill(bubble_fills, thresholds)
 
 
 def classify_sheet(

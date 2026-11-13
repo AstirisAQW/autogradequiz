@@ -11,6 +11,7 @@ from app.answer_sheet_templates.layout_spec import ColumnSpecMm, TemplateSpec, T
 
 BLACK = (0, 0, 0)
 BUBBLE_GRAY = (180, 180, 180)
+BUBBLE_OUTLINE_THICKNESS_PX = 2
 
 LABEL_ROW_OFFSET_MM = 5.0
 BASE_HERSHEY_TOTAL_HEIGHT_PX = 27.0
@@ -78,7 +79,7 @@ def draw_bubble(
 ) -> None:
     center = mm_to_px(center_x_mm, center_y_mm, page)
     radius_px = mm_length_to_px(radius_mm, page)
-    cv2.circle(canvas, center, radius_px, BUBBLE_GRAY, 2)
+    cv2.circle(canvas, center, radius_px, BUBBLE_GRAY, BUBBLE_OUTLINE_THICKNESS_PX)
 
 
 def draw_column_header(

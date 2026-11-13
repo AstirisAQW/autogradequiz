@@ -140,10 +140,9 @@ backend/
 
 ## Known limits
 
-- Thresholds are tuned on synthetic marks only. Light pencil marks on the 100-question
-  sheet may read as blank.
+- Faint marks now go to review (they read as ambiguous, not blank), but the thresholds are
+  calibrated on synthetic marks only and need calibration on real scans.
 - OCR on handwriting is weak. Use the identity endpoint to fix names.
 - Scans taken in very uneven light or with extreme perspective can be rejected.
 - Uploads are checked by content type and size only.
 - Grading runs inside the request. There is no background worker.
-- Cells in the CSV that start with `=`, `+`, `-` or `@` are not yet escaped.
