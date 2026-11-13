@@ -72,6 +72,7 @@ Set these as environment variables if you need to change the defaults.
 | POST   | `/tests`                           | Create a test: name, `template_id`, answer key             |
 | POST   | `/tests/{test_id}/batches`         | Create a batch of scans under a test                       |
 | POST   | `/batches/{batch_id}/scans`        | Upload a PNG or JPEG scan (up to 10 MB)                    |
+| GET    | `/scans/{scan_job_id}/image`       | Download the aligned (or raw) scan image                   |
 | POST   | `/scans/{scan_job_id}/grade`       | Grade a scan. Add `?force=true` to regrade a done scan     |
 | GET    | `/batches/{batch_id}/results`      | List results, with job status and any error                |
 | GET    | `/batches/{batch_id}/export.csv`   | Download results as CSV                                    |
