@@ -19,6 +19,7 @@ from app.bubble_grading.scoring import score_sheet
 from app.db import repositories
 from app.db.connection import init_db
 from app.db.records import NewBatch, NewScanJob, NewTest
+from app.grading_pipeline.corrections import apply_scan_corrections
 from app.grading_pipeline.exceptions import ScanImageUnreadableError, ScanJobAlreadyGradedError
 from app.grading_pipeline.grade_scan_job import grade_scan_job, scan_job_needs_review
 from app.scan_alignment.align_scan import ScanAlignmentError, align_scan
@@ -293,7 +294,7 @@ def test_grade_scan_job_correct_then_forced_regrade_keeps_100(tmp_path):
         grade_scan_job(scan_job.id)
 
     corrections = {i + 1: choice for i, choice in enumerate(sheet.answer_key)}
-    corrected = repositories.apply_scan_corrections(scan_job.id, corrections)
+    corrected = apply_scan_corrections(scan_job.id, corrections)
     assert corrected.score == 100.0
 
     regraded = grade_scan_job(scan_job.id, force=True)
@@ -345,7 +346,7 @@ def test_apply_scan_corrections_empty_matches_score_sheet_and_needs_review(tmp_p
         )
 
         grade_scan_job(scan_job.id)
-        corrected = repositories.apply_scan_corrections(scan_job.id, {})
+        corrected = apply_scan_corrections(scan_job.id, {})
 
         aligned = align_scan(sheet.image, template_spec)
         question_fills = classify_sheet(aligned, template_spec)
@@ -396,7 +397,7 @@ def test_apply_scan_corrections_flagged_question_matches_manual_recalculation(tm
     assert 1 in flags["multiple"]
 
     corrections = {1: answer_key[0]}
-    corrected = repositories.apply_scan_corrections(scan_job.id, corrections)
+    corrected = apply_scan_corrections(scan_job.id, corrections)
     answers = json.loads(corrected.answers_json)
     effective_answers = [corrections.get(i + 1, ans) for i, ans in enumerate(answers)]
     expected_correct = sum(

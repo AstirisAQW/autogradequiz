@@ -9,6 +9,7 @@ from app.db.exceptions import (
     TestNotFoundError,
 )
 from app.db.records import NewBatch, NewScanJob, NewScanResult, NewTest
+from app.grading_pipeline.corrections import apply_scan_corrections
 
 SAMPLE_ANSWER_KEY = ["A", "B", "C", "D"] * 5
 
@@ -199,7 +200,7 @@ def _create_flagged_scan_result(flagged_questions: list[int]) -> tuple[int, str]
 def test_apply_scan_corrections_correct_choice_rescores_and_clears_needs_review():
     scan_job_id, original_answers_json = _create_flagged_scan_result([1])
 
-    updated = repositories.apply_scan_corrections(scan_job_id, {1: SAMPLE_ANSWER_KEY[0]})
+    updated = apply_scan_corrections(scan_job_id, {1: SAMPLE_ANSWER_KEY[0]})
 
     assert updated.answers_json == original_answers_json
     assert updated.score == 100.0
@@ -210,7 +211,7 @@ def test_apply_scan_corrections_correct_choice_rescores_and_clears_needs_review(
 def test_apply_scan_corrections_wrong_choice_clears_needs_review_without_adding_score():
     scan_job_id, original_answers_json = _create_flagged_scan_result([1])
 
-    updated = repositories.apply_scan_corrections(scan_job_id, {1: "E"})
+    updated = apply_scan_corrections(scan_job_id, {1: "E"})
 
     assert updated.answers_json == original_answers_json
     assert updated.score == 95.0
@@ -220,13 +221,13 @@ def test_apply_scan_corrections_wrong_choice_clears_needs_review_without_adding_
 def test_apply_scan_corrections_partial_resolution_keeps_needs_review():
     scan_job_id, original_answers_json = _create_flagged_scan_result([1, 2])
 
-    partial = repositories.apply_scan_corrections(scan_job_id, {1: SAMPLE_ANSWER_KEY[0]})
+    partial = apply_scan_corrections(scan_job_id, {1: SAMPLE_ANSWER_KEY[0]})
 
     assert partial.answers_json == original_answers_json
     assert partial.score == 95.0
     assert partial.needs_review is True
 
-    resolved = repositories.apply_scan_corrections(scan_job_id, {2: "E"})
+    resolved = apply_scan_corrections(scan_job_id, {2: "E"})
 
     assert resolved.answers_json == original_answers_json
     assert resolved.score == 95.0

@@ -23,7 +23,6 @@ from app.config import get_settings
 from app.db.exceptions import ScanResultNotFoundError
 from app.db.records import NewScanResult, ScanResultRecord
 from app.db.repositories import (
-    apply_scan_corrections,
     get_batch,
     get_scan_job,
     get_scan_result,
@@ -32,6 +31,7 @@ from app.db.repositories import (
     save_scan_result,
     update_scan_job_status,
 )
+from app.grading_pipeline.corrections import apply_scan_corrections
 from app.grading_pipeline.exceptions import ScanImageUnreadableError, ScanJobAlreadyGradedError
 from app.scan_alignment.align_scan import align_scan
 
