@@ -1,14 +1,17 @@
 import csv
 import io
 import json
+import mimetypes
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.config import get_settings
 from app.db import repositories
+from app.db.exceptions import ScanResultNotFoundError
 from app.db.records import (
     BatchRecord,
     NewBatch,
@@ -131,6 +134,36 @@ def export_batch_csv_endpoint(batch_id: int) -> Response:
             ]
         )
     return Response(content=buf.getvalue(), media_type="text/csv")
+
+
+def _resolve_data_file(raw_path: str, data_dir: Path) -> Path | None:
+    if not raw_path:
+        return None
+    candidate = Path(raw_path).resolve()
+    if not candidate.is_relative_to(data_dir) or not candidate.is_file():
+        return None
+    return candidate
+
+
+@scans_router.get("/{scan_job_id}/image")
+def get_scan_image_endpoint(scan_job_id: int) -> FileResponse:
+    scan_job = repositories.get_scan_job(scan_job_id)
+    data_dir = Path(get_settings().autograde_data_dir).resolve()
+
+    candidates: list[str] = []
+    try:
+        candidates.append(repositories.get_scan_result(scan_job_id).processed_image_path)
+    except ScanResultNotFoundError:
+        pass
+    candidates.append(scan_job.raw_image_path)
+
+    for raw_path in candidates:
+        image_path = _resolve_data_file(raw_path, data_dir)
+        if image_path is not None:
+            media_type, _ = mimetypes.guess_type(str(image_path))
+            return FileResponse(image_path, media_type=media_type)
+
+    raise HTTPException(status_code=404, detail=f"Image for scan job {scan_job_id} not found.")
 
 
 @scans_router.post("/{scan_job_id}/grade")

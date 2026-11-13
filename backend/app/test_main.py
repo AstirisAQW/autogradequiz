@@ -31,6 +31,7 @@ except RuntimeError:
     class _Response:
         status_code: int
         content: bytes
+        headers: dict[str, str]
 
         @property
         def text(self) -> str:
@@ -90,6 +91,7 @@ except RuntimeError:
                 "server": ("testserver", 80),
             }
             status_code = 500
+            response_headers: dict[str, str] = {}
             chunks: list[bytes] = []
             sent = False
 
@@ -101,14 +103,20 @@ except RuntimeError:
                 return {"type": "http.disconnect"}
 
             async def send(message: dict[str, Any]) -> None:
-                nonlocal status_code
+                nonlocal status_code, response_headers
                 if message["type"] == "http.response.start":
                     status_code = message["status"]
+                    response_headers = {
+                        k.decode("latin-1").lower(): v.decode("latin-1")
+                        for k, v in message.get("headers", [])
+                    }
                 elif message["type"] == "http.response.body":
                     chunks.append(message.get("body", b""))
 
             anyio.run(self._app, scope, receive, send)
-            return _Response(status_code=status_code, content=b"".join(chunks))
+            return _Response(
+                status_code=status_code, content=b"".join(chunks), headers=response_headers
+            )
 
         def get(self, path: str) -> _Response:
             return self._request("GET", path)
@@ -491,6 +499,81 @@ def test_trace_ambiguous_flows_through_scoring_review_corrections_and_csv():
 
     rows_after = list(csv.reader(io.StringIO(client.get(f"/batches/{batch_id}/export.csv").text)))
     assert rows_after[1][3:8] == ["10.0", "False", "A", "B", ""]
+
+
+def test_get_scan_image_unknown_scan_returns_404():
+    client = TestClient(app)
+    assert client.get("/scans/999999/image").status_code == 404
+
+
+def test_get_scan_image_graded_scan_returns_processed_image_bytes():
+    from pathlib import Path
+
+    client = TestClient(app)
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=0)
+    test_id = client.post(
+        "/tests",
+        json={"name": "Img Quiz", "template_id": "20q_a4", "answer_key": sheet.answer_key},
+    ).json()["id"]
+    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
+    scan_id = client.post(
+        f"/batches/{batch_id}/scans",
+        files={"file": ("sheet.png", _encode_png(sheet.image), "image/png")},
+    ).json()["id"]
+
+    graded = client.post(f"/scans/{scan_id}/grade").json()
+    processed_bytes = Path(graded["processed_image_path"]).read_bytes()
+
+    response = client.get(f"/scans/{scan_id}/image")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/")
+    assert response.content == processed_bytes
+
+
+def test_get_scan_image_deleted_files_returns_404():
+    from pathlib import Path
+
+    client = TestClient(app)
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=0)
+    test_id = client.post(
+        "/tests",
+        json={"name": "Img Quiz", "template_id": "20q_a4", "answer_key": sheet.answer_key},
+    ).json()["id"]
+    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
+    scan = client.post(
+        f"/batches/{batch_id}/scans",
+        files={"file": ("sheet.png", _encode_png(sheet.image), "image/png")},
+    ).json()
+    graded = client.post(f"/scans/{scan['id']}/grade").json()
+
+    Path(graded["processed_image_path"]).unlink()
+    Path(scan["raw_image_path"]).unlink()
+
+    assert client.get(f"/scans/{scan['id']}/image").status_code == 404
+
+
+def test_get_scan_image_outside_data_dir_returns_404(tmp_path):
+    from app.db import repositories
+    from app.db.records import NewScanJob
+
+    client = TestClient(app)
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=0)
+    test_id = client.post(
+        "/tests",
+        json={"name": "Outside Quiz", "template_id": "20q_a4", "answer_key": sheet.answer_key},
+    ).json()["id"]
+    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
+
+    outside_file = tmp_path.parent / f"{tmp_path.name}_outside.png"
+    outside_file.write_bytes(_encode_png(sheet.image))
+    try:
+        outside_job = repositories.create_scan_job(
+            NewScanJob(batch_id=batch_id, raw_image_path=str(outside_file))
+        )
+        assert client.get(f"/scans/{outside_job.id}/image").status_code == 404
+    finally:
+        outside_file.unlink(missing_ok=True)
+
 
 
 
