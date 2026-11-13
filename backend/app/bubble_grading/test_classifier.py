@@ -3,14 +3,14 @@ import numpy as np
 
 from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import FIFTY_QUESTIONS, HUNDRED_QUESTIONS, TWENTY_QUESTIONS
+from app.answer_sheet_templates.geometry import bubble_position_px, bubble_radius_px
 from app.bubble_grading.classifier import (
-     DEFAULT_THRESHOLDS,
+    DEFAULT_THRESHOLDS,
     BubbleResult,
-    QuestionOutcome,
     classify_sheet,
-    score_sheet,
 )
-from app.sheet_rendering.renderer import bubble_position_px, bubble_radius_px, render_sheet
+from app.bubble_grading.scoring import QuestionOutcome, score_sheet
+from app.sheet_rendering.renderer import render_sheet
 from app.synthetic_sheets.mark_drawing import draw_marks_for_plan
 from app.synthetic_sheets.question_plan import QuestionMarkKind, generate_question_plans
 

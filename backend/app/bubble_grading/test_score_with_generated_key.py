@@ -2,9 +2,10 @@ import numpy as np
 
 from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import TWENTY_QUESTIONS
-from app.answer_sheet_templates.geometry import ANSWER_CHOICES
-from app.bubble_grading.classifier import BubbleResult, QuestionOutcome, classify_sheet, score_sheet
-from app.sheet_rendering.renderer import bubble_radius_px, render_sheet
+from app.answer_sheet_templates.geometry import ANSWER_CHOICES, bubble_radius_px
+from app.bubble_grading.classifier import BubbleResult, classify_sheet
+from app.bubble_grading.scoring import QuestionOutcome, score_sheet
+from app.sheet_rendering.renderer import render_sheet
 from app.synthetic_sheets.mark_drawing import draw_marks_for_plan
 from app.synthetic_sheets.question_plan import generate_answer_key, generate_question_plans
 

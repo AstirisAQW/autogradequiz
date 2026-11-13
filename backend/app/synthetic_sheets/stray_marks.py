@@ -5,8 +5,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from app.answer_sheet_templates.geometry import PageSize
-from app.sheet_rendering.renderer import mm_length_to_px
+from app.answer_sheet_templates.geometry import PageSize, mm_length_to_px
 
 STRAY_MARK_MIN_COUNT = 0
 STRAY_MARK_MAX_COUNT = 4

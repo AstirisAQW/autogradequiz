@@ -7,9 +7,9 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from app.answer_sheet_templates.geometry import ANSWER_CHOICES, PageSize
+from app.answer_sheet_templates.geometry import ANSWER_CHOICES, PageSize, bubble_position_px
 from app.answer_sheet_templates.layout_spec import TemplateSpec
-from app.sheet_rendering.renderer import BLACK, bubble_position_px
+from app.sheet_rendering.renderer import BLACK
 from app.synthetic_sheets.question_plan import QuestionMarkKind, QuestionPlan
 
 

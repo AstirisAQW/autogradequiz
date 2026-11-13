@@ -18,6 +18,7 @@ from app.db.records import (
     ScanResultRecord,
     TestRecord,
 )
+from app.grading_pipeline.corrections import apply_scan_corrections
 from app.grading_pipeline.grade_scan_job import grade_scan_job
 
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg"}
@@ -141,7 +142,7 @@ def grade_scan_endpoint(scan_job_id: int, force: bool = False) -> ScanResultReco
 def apply_corrections_endpoint(
     scan_job_id: int, payload: CorrectionsRequest
 ) -> ScanResultRecord:
-    return repositories.apply_scan_corrections(scan_job_id, payload.corrections)
+    return apply_scan_corrections(scan_job_id, payload.corrections)
 
 
 @scans_router.patch("/{scan_job_id}/identity")
