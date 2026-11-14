@@ -1,12 +1,17 @@
 import json
 
 import numpy as np
+import pytest
 
 from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import TWENTY_QUESTIONS
 from app.answer_sheet_templates.geometry import mm_to_px
+from app.bubble_grading.classifier import classify_sheet
+from app.bubble_grading.scoring import score_sheet
+from app.scan_alignment.align_scan import align_scan
 from app.synthetic_sheets.generator import generate_synthetic_sheet
 from app.synthetic_sheets.ground_truth import (
+    expected_score_after_review,
     save_ground_truth,
     synthetic_sheet_ground_truth_to_dict,
 )
@@ -126,3 +131,45 @@ def test_ground_truth_round_trip_reproduces_the_same_sheet(tmp_path):
 
     assert np.array_equal(regenerated.image, sheet.image)
     assert synthetic_sheet_ground_truth_to_dict(regenerated) == saved
+
+
+def test_graded_sheet_with_full_accuracy_and_zero_messy_matches_expected_score(tmp_path):
+    answer_key = list("ABCDE" * 4)
+    sheet = generate_synthetic_sheet(
+        TWENTY_QUESTIONS,
+        seed=5,
+        answer_key=answer_key,
+        accuracy=1.0,
+        messy=0.0,
+    )
+    out_path = tmp_path / "sheet_005.json"
+    save_ground_truth(sheet, out_path)
+    saved = json.loads(out_path.read_text(encoding="utf-8"))
+
+    aligned = align_scan(sheet.image, TWENTY_QUESTIONS)
+    summary = score_sheet(classify_sheet(aligned, TWENTY_QUESTIONS), answer_key)
+
+    assert summary.score_fraction * 100.0 == saved["expected_score_after_review"]
+    assert saved["expected_score_after_review"] == expected_score_after_review(sheet)
+
+
+def test_cli_rejects_invalid_answer_key_letters_and_wrong_length(monkeypatch):
+    import sys
+
+    from scripts import generate_synthetic_sheets
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["generate_synthetic_sheets.py", "--templates", "20q_a4", "--answer-key", "ABCDX" * 4],
+    )
+    with pytest.raises(SystemExit):
+        generate_synthetic_sheets.main()
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["generate_synthetic_sheets.py", "--templates", "20q_a4", "--answer-key", "ABCDE"],
+    )
+    with pytest.raises(SystemExit):
+        generate_synthetic_sheets.main()

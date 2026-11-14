@@ -22,11 +22,24 @@ def question_plan_to_dict(plan: QuestionPlan) -> dict:
     }
 
 
+def expected_score_after_review(sheet: SyntheticSheet) -> float:
+    """Percentage of questions whose marked_choices equals [correct_choice]."""
+    if not sheet.question_plans:
+        return 0.0
+    correct_count = sum(
+        1
+        for plan in sheet.question_plans
+        if plan.marked_choices == (plan.correct_choice,)
+    )
+    return (correct_count / len(sheet.question_plans)) * 100.0
+
+
 def synthetic_sheet_ground_truth_to_dict(sheet: SyntheticSheet) -> dict:
     return {
         "seed": sheet.seed,
         "template_id": sheet.template_id,
         "stray_mark_count": sheet.stray_mark_count,
+        "expected_score_after_review": expected_score_after_review(sheet),
         "questions": [question_plan_to_dict(plan) for plan in sheet.question_plans],
     }
 

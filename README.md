@@ -120,7 +120,10 @@ Synthetic filled-in sheets for testing are written to `backend/data/synthetic_sh
 python scripts/generate_synthetic_sheets.py
 python scripts/generate_synthetic_sheets.py --templates 20q_a4 --count 10 --pdf
 python scripts/generate_synthetic_sheets.py --start-seed 100 --count 3
+python scripts/generate_synthetic_sheets.py --templates 20q_a4 --answer-key ABCDEABCDEABCDEABCDE --accuracy 0.8 --messy 0.1
 ```
+
+Options: `--answer-key` sets the key (A to E, matching the template's question count), `--accuracy` sets the chance a marked question is right, and `--messy` sets the share of messy marks. Each sheet's JSON includes `expected_score_after_review`: it is the score the app should show after a teacher resolves every flagged question to the letter that is drawn.
 
 ## Project layout
 

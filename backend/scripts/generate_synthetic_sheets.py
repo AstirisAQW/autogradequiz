@@ -21,6 +21,7 @@ import cv2
 from PIL import Image
 
 from app.answer_sheet_templates.catalog import list_template_specs
+from app.answer_sheet_templates.geometry import ANSWER_CHOICES
 from app.answer_sheet_templates.layout_spec import TemplateSpec
 from app.config import get_settings
 from app.synthetic_sheets.generator import generate_synthetic_sheet
@@ -32,13 +33,35 @@ def synthetic_sheets_output_dir() -> Path:
     return Path(settings.autograde_data_dir) / "synthetic_sheets"
 
 
+def parse_answer_key(raw_key: str) -> list[str]:
+    letters = [ch for ch in raw_key.upper() if ch not in (" ", ",")]
+    invalid = sorted({ch for ch in letters if ch not in ANSWER_CHOICES})
+    if invalid:
+        raise SystemExit(
+            f"Invalid answer key character(s): {', '.join(invalid)}. Only A to E allowed."
+        )
+    return letters
+
+
 def write_synthetic_sheet_files(
-    template_spec: TemplateSpec, seed: int, output_root: Path, write_pdf: bool
+    template_spec: TemplateSpec,
+    seed: int,
+    output_root: Path,
+    write_pdf: bool,
+    answer_key: list[str] | None = None,
+    accuracy: float | None = None,
+    messy: float | None = None,
 ) -> None:
     output_dir = output_root / template_spec.template_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    sheet = generate_synthetic_sheet(template_spec, seed)
+    sheet = generate_synthetic_sheet(
+        template_spec,
+        seed,
+        answer_key=answer_key,
+        accuracy=accuracy,
+        messy=messy,
+    )
     stem = f"seed_{seed:04d}"
 
     image_path = output_dir / f"{stem}.png"
@@ -79,14 +102,54 @@ def main() -> None:
         "--start-seed", type=int, default=0, help="First seed to use; seeds count up from here."
     )
     parser.add_argument("--pdf", action="store_true", help="Also write a PDF alongside the PNG.")
+    parser.add_argument(
+        "--answer-key",
+        type=str,
+        default=None,
+        help="Answer key string (letters A to E) matching the template's question count.",
+    )
+    parser.add_argument(
+        "--accuracy",
+        type=float,
+        default=None,
+        help="Chance (0.0 to 1.0) a marked question gets the correct letter.",
+    )
+    parser.add_argument(
+        "--messy",
+        type=float,
+        default=None,
+        help="Share (0.0 to 1.0) of questions drawn with messy marks.",
+    )
     args = parser.parse_args()
 
+    if args.accuracy is not None and not 0.0 <= args.accuracy <= 1.0:
+        raise SystemExit("--accuracy must be between 0.0 and 1.0.")
+    if args.messy is not None and not 0.0 <= args.messy <= 1.0:
+        raise SystemExit("--messy must be between 0.0 and 1.0.")
+
+    answer_key = parse_answer_key(args.answer_key) if args.answer_key is not None else None
     template_specs = resolve_template_specs(args.templates)
+    if answer_key is not None:
+        for spec in template_specs:
+            if len(answer_key) != spec.question_count:
+                raise SystemExit(
+                    f"--answer-key length ({len(answer_key)}) does not match "
+                    f"{spec.template_id} ({spec.question_count} questions)."
+                )
+
     output_root = synthetic_sheets_output_dir()
 
     for template_spec in template_specs:
         for seed in range(args.start_seed, args.start_seed + args.count):
-            write_synthetic_sheet_files(template_spec, seed, output_root, args.pdf)
+            write_synthetic_sheet_files(
+                template_spec,
+                seed,
+                output_root,
+                args.pdf,
+                answer_key=answer_key,
+                accuracy=args.accuracy,
+                messy=args.messy,
+            )
 
 
 if __name__ == "__main__":

@@ -59,10 +59,51 @@ def generate_answer_key(question_count: int, rng: np.random.Generator) -> list[s
     return [str(choice) for choice in rng.choice(ANSWER_CHOICES, size=question_count)]
 
 
+_MESSY_KINDS = frozenset(
+    {
+        QuestionMarkKind.DOUBLE,
+        QuestionMarkKind.INCOMPLETE,
+        QuestionMarkKind.OFF_CENTER,
+        QuestionMarkKind.NON_CIRCULAR,
+        QuestionMarkKind.LIGHT,
+    }
+)
+_BLANK_DEFAULT_WEIGHT = dict(QUESTION_MARK_WEIGHTS)[QuestionMarkKind.BLANK]
+_MESSY_DEFAULT_TOTAL = sum(
+    weight for kind, weight in QUESTION_MARK_WEIGHTS if kind in _MESSY_KINDS
+)
+
+
+def _mark_weights(messy: float | None) -> tuple[list[QuestionMarkKind], list[float]]:
+    if messy is None:
+        return (
+            [kind for kind, _ in QUESTION_MARK_WEIGHTS],
+            [weight for _, weight in QUESTION_MARK_WEIGHTS],
+        )
+    if not 0.0 <= messy <= 1.0:
+        raise ValueError(f"messy must be between 0.0 and 1.0, got {messy}.")
+
+    blank_weight = min(_BLANK_DEFAULT_WEIGHT, 1.0 - messy)
+    perfect_weight = max(0.0, 1.0 - messy - blank_weight)
+    kinds: list[QuestionMarkKind] = []
+    weights: list[float] = []
+    for kind, default_weight in QUESTION_MARK_WEIGHTS:
+        kinds.append(kind)
+        if kind == QuestionMarkKind.PERFECT:
+            weights.append(perfect_weight)
+        elif kind == QuestionMarkKind.BLANK:
+            weights.append(blank_weight)
+        else:
+            weights.append((default_weight / _MESSY_DEFAULT_TOTAL) * messy)
+    return kinds, weights
+
+
 def generate_question_plans(
     template_spec: TemplateSpec,
     rng: np.random.Generator,
     answer_key: list[str] | None = None,
+    accuracy: float | None = None,
+    messy: float | None = None,
 ) -> tuple[QuestionPlan, ...]:
     """Ground truth for every question on one sheet.
 
@@ -70,8 +111,10 @@ def generate_question_plans(
     from rng -- so the same key can be graded against many independently-generated
     sheets, the way one real test's answer key is graded against a batch of scans.
     """
-    kinds = [kind for kind, _ in QUESTION_MARK_WEIGHTS]
-    weights = [weight for _, weight in QUESTION_MARK_WEIGHTS]
+    if accuracy is not None and not 0.0 <= accuracy <= 1.0:
+        raise ValueError(f"accuracy must be between 0.0 and 1.0, got {accuracy}.")
+
+    kinds, weights = _mark_weights(messy)
 
     plans = []
     for question_number in range(1, template_spec.question_count + 1):
@@ -86,6 +129,12 @@ def generate_question_plans(
         elif mark_kind == QuestionMarkKind.DOUBLE:
             chosen = rng.choice(ANSWER_CHOICES, size=2, replace=False)
             marked_choices = tuple(str(choice) for choice in chosen)
+        elif accuracy is not None:
+            if rng.random() < accuracy:
+                marked_choices = (correct_choice,)
+            else:
+                wrong_choices = [c for c in ANSWER_CHOICES if c != correct_choice]
+                marked_choices = (str(rng.choice(wrong_choices)),)
         else:
             marked_choices = (str(rng.choice(ANSWER_CHOICES)),)
 

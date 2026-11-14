@@ -48,6 +48,8 @@ def generate_synthetic_sheet(
     seed: int,
     page: PageSize = PAGE,
     answer_key: list[str] | None = None,
+    accuracy: float | None = None,
+    messy: float | None = None,
 ) -> SyntheticSheet:
     """Render one fully reproducible synthetic sheet for the given seed.
 
@@ -65,7 +67,9 @@ def generate_synthetic_sheet(
     canvas = render_sheet(template_spec, page=page)
     radius_px = bubble_radius_px(template_spec, page)
 
-    question_plans = generate_question_plans(template_spec, rng, answer_key=answer_key)
+    question_plans = generate_question_plans(
+        template_spec, rng, answer_key=answer_key, accuracy=accuracy, messy=messy
+    )
     for plan in question_plans:
         draw_marks_for_plan(canvas, template_spec, plan, radius_px, page, rng)
 
