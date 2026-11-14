@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { BatchUploadGrader } from "@/components/BatchUploadGrader";
 import { ApiError, createBatch, createTest, getHealth } from "@/lib/api";
 import {
   TEMPLATE_QUESTION_COUNTS,
@@ -294,6 +295,14 @@ export default function Home() {
               </button>
             </div>
           </div>
+        </section>
+      )}
+
+      {activeBatch ? (
+        <BatchUploadGrader key={activeBatch.id} batchId={activeBatch.id} />
+      ) : (
+        <section className="rounded-lg border border-dashed border-zinc-300 bg-white p-6 text-sm text-zinc-600">
+          Create a batch first.
         </section>
       )}
     </div>
