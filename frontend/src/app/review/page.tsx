@@ -64,6 +64,7 @@ export default function ReviewPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNote, setActionNote] = useState<string | null>(null);
   const [saveCount, setSaveCount] = useState(0);
+  const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
 
   function selectScan(scan: ScanResultRecord | null) {
     setSelectedId(scan?.scan_job_id ?? null);
@@ -223,6 +224,7 @@ export default function ReviewPage() {
         `${selectedScan.created_at}-${saveCount}`,
       )
     : null;
+  const imageFailed = imageUrl !== null && failedImageUrl === imageUrl;
 
   return (
     <div className="space-y-6">
@@ -325,25 +327,33 @@ export default function ReviewPage() {
                   <h3 className="text-sm font-semibold text-zinc-900">
                     Scan image
                   </h3>
-                  {imageUrl && (
-                    <a
-                      href={imageUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="Open full image in a new tab"
-                      className="block overflow-hidden rounded-md border border-zinc-200 bg-zinc-50"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={imageUrl}
-                        alt={`Scan ${selectedScan.scan_job_id}`}
-                        className="max-h-[480px] w-full object-contain"
-                      />
-                    </a>
+                  {imageUrl && !imageFailed ? (
+                    <>
+                      <a
+                        href={imageUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open full image in a new tab"
+                        className="block overflow-hidden rounded-md border border-zinc-200 bg-zinc-50"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          key={imageUrl}
+                          src={imageUrl}
+                          alt={`Scan ${selectedScan.scan_job_id}`}
+                          onError={() => setFailedImageUrl(imageUrl)}
+                          className="max-h-[480px] w-full object-contain"
+                        />
+                      </a>
+                      <p className="text-xs text-zinc-500">
+                        Click the image to open full size in a new tab.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="flex min-h-[200px] items-center justify-center rounded-md border border-zinc-200 bg-zinc-50 p-6 text-center text-sm text-zinc-600">
+                      Image not available for this scan
+                    </div>
                   )}
-                  <p className="text-xs text-zinc-500">
-                    Click the image to open full size in a new tab.
-                  </p>
                 </div>
 
                 <div className="space-y-6">
