@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { BatchResultsTable } from "@/components/BatchResultsTable";
 import { BatchUploadGrader } from "@/components/BatchUploadGrader";
 import { ApiError, createBatch, createTest, getHealth } from "@/lib/api";
 import {
@@ -64,6 +65,7 @@ export default function Home() {
   const [activeBatch, setActiveBatch] = useState<BatchRecord | null>(null);
   const [submittingTest, setSubmittingTest] = useState(false);
   const [submittingBatch, setSubmittingBatch] = useState(false);
+  const [resultsVersion, setResultsVersion] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -299,7 +301,17 @@ export default function Home() {
       )}
 
       {activeBatch ? (
-        <BatchUploadGrader key={activeBatch.id} batchId={activeBatch.id} />
+        <>
+          <BatchUploadGrader
+            key={activeBatch.id}
+            batchId={activeBatch.id}
+            onRunFinished={() => setResultsVersion((v) => v + 1)}
+          />
+          <BatchResultsTable
+            batchId={activeBatch.id}
+            refreshTrigger={resultsVersion}
+          />
+        </>
       ) : (
         <section className="rounded-lg border border-dashed border-zinc-300 bg-white p-6 text-sm text-zinc-600">
           Create a batch first.

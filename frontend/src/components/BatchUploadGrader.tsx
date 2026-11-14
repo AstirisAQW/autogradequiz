@@ -24,9 +24,13 @@ interface ScanRow {
 
 interface BatchUploadGraderProps {
   batchId: number;
+  onRunFinished?: () => void;
 }
 
-export function BatchUploadGrader({ batchId }: BatchUploadGraderProps) {
+export function BatchUploadGrader({
+  batchId,
+  onRunFinished,
+}: BatchUploadGraderProps) {
   const [rows, setRows] = useState<ScanRow[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -124,6 +128,7 @@ export function BatchUploadGrader({ batchId }: BatchUploadGraderProps) {
       }
     } finally {
       setIsRunning(false);
+      onRunFinished?.();
     }
   }
 
@@ -134,6 +139,7 @@ export function BatchUploadGrader({ batchId }: BatchUploadGraderProps) {
       await processOneRow({ ...row, scanJobId: null });
     } finally {
       setIsRunning(false);
+      onRunFinished?.();
     }
   }
 
@@ -166,6 +172,7 @@ export function BatchUploadGrader({ batchId }: BatchUploadGraderProps) {
       });
     } finally {
       setIsRunning(false);
+      onRunFinished?.();
     }
   }
 
