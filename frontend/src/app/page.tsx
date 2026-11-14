@@ -182,7 +182,7 @@ export default function Home() {
                 value={testName}
                 onChange={(e) => setTestName(e.target.value)}
                 placeholder="Chapter 4 Quiz"
-                className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none"
               />
             </div>
 
@@ -197,7 +197,7 @@ export default function Home() {
                 id="template-id"
                 value={templateId}
                 onChange={(e) => setTemplateId(e.target.value as TemplateId)}
-                className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-900 focus:outline-none"
               >
                 <option value="20q_a4">20q_a4 (20 questions)</option>
                 <option value="50q_a4">50q_a4 (50 questions)</option>
@@ -230,7 +230,7 @@ export default function Home() {
               value={rawAnswerKey}
               onChange={(e) => setRawAnswerKey(e.target.value)}
               placeholder="ABCDE ABCDE ..."
-              className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 font-mono text-sm uppercase focus:border-zinc-900 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 font-mono text-sm uppercase text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none"
             />
             {invalidChars.length > 0 && (
               <p className="mt-1 text-xs text-red-600">
@@ -243,7 +243,7 @@ export default function Home() {
           <button
             type="submit"
             disabled={!canCreateTest}
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
+            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500"
           >
             {submittingTest ? "Creating..." : "Create test"}
           </button>
@@ -282,7 +282,7 @@ export default function Home() {
                 type="button"
                 onClick={handleCreateBatch}
                 disabled={submittingBatch}
-                className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500"
               >
                 {submittingBatch ? "Creating batch..." : "Create batch"}
               </button>

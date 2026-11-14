@@ -208,7 +208,7 @@ export function BatchUploadGrader({ batchId }: BatchUploadGraderProps) {
           type="button"
           disabled={isRunning || !hasWaiting}
           onClick={handleUploadAndGrade}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
+          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500"
         >
           {isRunning ? "Grading..." : "Upload and grade"}
         </button>
