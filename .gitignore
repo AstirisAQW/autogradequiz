@@ -47,9 +47,13 @@ next-env.d.ts
 data/autograde.db
 data/synthetic_sheets/
 data/read_check_failures/
+data/raw/
+data/processed/
 /backend/data/autograde.db
 /backend/data/synthetic_sheets/
 /backend/data/read_check_failures/
+/backend/data/raw/
+/backend/data/processed/
 !/backend/data/templates/
 !data/templates/
 
