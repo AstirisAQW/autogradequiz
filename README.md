@@ -1,130 +1,124 @@
 # AutoGradeQuiz
 
-AutoGradeQuiz grades multiple-choice answer sheets from scanned or photographed pages.
-A teacher prints a sheet, students fill in the bubbles, and the app reads the answers,
-scores them against an answer key, and lets the teacher fix doubtful answers before
-exporting the results as CSV.
+AutoGradeQuiz grades multiple-choice answer sheets from scanned or photographed pages. A teacher prints a sheet, students fill in the bubbles, and the app aligns the page, reads the marks, scores them against an answer key, lets the teacher fix doubtful answers, and exports the batch as CSV.
 
-> **Status: work in progress.** The backend is built and tested on synthetic sheets only.
-> It has not been calibrated on real scans yet, and there is no client app yet.
+> **Status:** Backend and web client v1 are done. Tested on synthetic sheets only; not yet calibrated on real scans.
 
-## How it works
+## How one sheet moves through the app
 
-1. **Template.** Three A4 sheet templates (20, 50 and 100 questions) are defined in
-   millimeters and converted to page-fraction geometry. Each sheet has corner markers,
-   Name / Date / Section boxes, and answer bubbles A to E.
-2. **Alignment.** The scan is found by its four corner markers and warped to the template
-   page size. A sheet rotated by 180 degrees is detected and turned the right way.
-   A scan with fewer than four markers is rejected, never graded.
-3. **Grading.** The fill ratio of each bubble is measured. Each question becomes one of
-   `correct`, `wrong`, `blank`, `ambiguous` or `multiple`, and the sheet is scored.
-4. **Identity.** Name, date and section are read with Tesseract OCR. If OCR fails, the
-   fields stay empty and grading still completes.
-5. **Review.** Sheets with ambiguous or multiple answers, or with every question blank,
-   are flagged `needs_review`. A teacher corrects answers and identity fields by hand.
-   Corrections are stored separately and the original answers are kept.
-6. **Export.** Batch results download as CSV.
-
-## Requirements
-
-- Python 3.13 or newer
-- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) installed (needed only to
-  read names, dates and sections). On Windows, install it and set `TESSERACT_CMD` to the
-  full path of `tesseract.exe` if it is not on your `PATH`.
-
-## Setup
-
-From the repository root:
-
+```mermaid
+flowchart LR
+    T["Template (20/50/100 Q)"] --> P["Print at 100%"]
+    P --> U["Upload PNG/JPEG"]
+    U --> A["Align 4 corners"]
+    A --> R["Read bubbles + OCR"]
+    R --> S["Score against key"]
+    S --> V["Review flagged items"]
+    V --> E["Export CSV"]
 ```
+
+## Run it (Windows)
+
+### Requirements
+
+- Python 3.13+
+- Node.js 20+ and npm
+- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) (needed only to read Name, Date, and Section). Set `TESSERACT_CMD` to `tesseract.exe` if it is not on `PATH`.
+
+### 1. Backend API
+
+```powershell
 cd backend
 python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # macOS / Linux
+.venv\Scripts\activate
 pip install -e ".[dev]"
-```
-
-## Run the API
-
-```
-cd backend
 uvicorn app.main:app --reload
 ```
 
-Open <http://127.0.0.1:8000/docs> for interactive API docs. Health check: `GET /health`.
+API docs: <http://127.0.0.1:8000/docs> (`GET /health` for health check). Uploads and SQLite data live under `backend/data/`.
 
-The SQLite database and uploaded scans are stored under `backend/data/`.
+### 2. Web client
 
-### Settings
-
-Set these as environment variables if you need to change the defaults.
-
-| Variable             | Default                     | Purpose                                      |
-| -------------------- | --------------------------- | -------------------------------------------- |
-| `AUTOGRADE_DATA_DIR` | `backend/data`              | Where uploads and processed images are saved |
-| `AUTOGRADE_DB_PATH`  | `backend/data/autograde.db` | SQLite database file                         |
-| `TESSERACT_CMD`      | empty (uses `PATH`)         | Full path to the Tesseract program           |
-
-## API overview
-
-| Method | Path                               | What it does                                               |
-| ------ | ---------------------------------- | ---------------------------------------------------------- |
-| POST   | `/tests`                           | Create a test: name, `template_id`, answer key             |
-| POST   | `/tests/{test_id}/batches`         | Create a batch of scans under a test                       |
-| POST   | `/batches/{batch_id}/scans`        | Upload a PNG or JPEG scan (up to 10 MB)                    |
-| GET    | `/scans/{scan_job_id}/image`       | Download the aligned (or raw) scan image                   |
-| POST   | `/scans/{scan_job_id}/grade`       | Grade a scan. Add `?force=true` to regrade a done scan     |
-| GET    | `/batches/{batch_id}/results`      | List results, with job status and any error                |
-| GET    | `/batches/{batch_id}/export.csv`   | Download results as CSV                                    |
-| GET    | `/review-queue`                    | List scans that need review                                |
-| PATCH  | `/scans/{scan_job_id}/corrections` | Correct answers, for example `{"corrections": {"1": "B"}}` |
-| PATCH  | `/scans/{scan_job_id}/identity`    | Set name, date or section by hand                          |
-
-Template ids: `20q_a4`, `50q_a4`, `100q_a4`. The answer key needs one letter from A to E
-per question.
-
-Error codes: `404` not found, `409` scan already graded, `422` invalid input or a scan
-that cannot be aligned.
-
-### Try it
-
-1. `POST /tests` with `template_id` `20q_a4` and a 20-letter answer key.
-2. `POST /tests/{id}/batches`.
-3. `POST /batches/{id}/scans` with a sheet image.
-4. `POST /scans/{id}/grade`.
-5. `GET /batches/{id}/results`, then `GET /batches/{id}/export.csv`.
-
-## Tests and lint
-
+```powershell
+cd frontend
+npm install
+npm run dev
 ```
+
+Open <http://localhost:3000>.
+
+### 3. Try the demo
+
+Generate sample filled-in sheets (requires the backend `.venv` activated and `PYTHONPATH=.` if not installed editable):
+
+```powershell
 cd backend
-pytest
-ruff check .
-```
-
-## Generate sheets
-
-Print templates (PNG, PDF and JSON) are written to `backend/data/templates/`:
-
-```
-cd backend
+.venv\Scripts\activate
 python scripts/generate_templates.py
+python scripts/generate_synthetic_sheets.py --templates 20q_a4 --count 5
 ```
 
-Print them at 100% scale. Do not use "fit to page", because it changes the marker
-geometry.
+1. Print templates land in `backend/data/templates/` (print at 100% scale; never use "fit to page").
+2. Synthetic sample sheets land in `backend/data/synthetic_sheets/20q_a4/`.
+3. Open <http://localhost:3000>, create a test (`20q_a4`) and a batch, upload the generated PNGs, and click **Upload and grade**.
 
-Synthetic filled-in sheets for testing are written to `backend/data/synthetic_sheets/`:
+## Screens
 
-```
-python scripts/generate_synthetic_sheets.py
-python scripts/generate_synthetic_sheets.py --templates 20q_a4 --count 10 --pdf
-python scripts/generate_synthetic_sheets.py --start-seed 100 --count 3
-```
+- **Home (test, batch & upload):** Create a test with its template (`20q_a4`, `50q_a4`, `100q_a4`) and answer key, create a batch, then select multiple PNG/JPEG scans to upload and grade sequentially.
+
+  ![Home screen](docs/screenshots/home.png)
+
+- **Results:** View every scan in the active batch with score, status, and review badge, regrade individual rows, and export the batch to CSV.
+
+  ![Results table](docs/screenshots/results.png)
+
+- **Review:** Work through scans flagged `needs_review` side by side with the aligned sheet image, fix flagged answers or identity fields, and save corrections.
+
+  ![Review screen](docs/screenshots/review.png)
+
+## Settings & API overview
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AUTOGRADE_DATA_DIR` | `backend/data` | Uploaded and aligned scan images |
+| `AUTOGRADE_DB_PATH` | `backend/data/autograde.db` | SQLite database file |
+| `TESSERACT_CMD` | empty (uses `PATH`) | Full path to `tesseract.exe` |
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| `POST` | `/tests` | Create a test (`name`, `template_id`, `answer_key`) |
+| `POST` | `/tests/{test_id}/batches` | Create a batch under a test |
+| `POST` | `/batches/{batch_id}/scans` | Upload a PNG or JPEG scan (up to 10 MB) |
+| `POST` | `/scans/{scan_job_id}/grade` | Grade a scan (`?force=true` to regrade) |
+| `GET` | `/scans/{scan_job_id}/image` | Serve the scan image for review |
+| `GET` | `/batches/{batch_id}/results` | List batch results and job statuses |
+| `GET` | `/batches/{batch_id}/export.csv` | Download batch results as CSV |
+| `GET` | `/review-queue` | List scans needing review |
+| `PATCH` | `/scans/{scan_job_id}/corrections` | Save answer corrections (`{"corrections": {"1": "B"}}`) |
+| `PATCH` | `/scans/{scan_job_id}/identity` | Update Name, Date, or Section |
+
+## How it was tested
+
+Run from `backend/` with `.venv` activated (and `PYTHONPATH=.` for `scripts/read_check.py`):
+
+- `pytest`: **121 passed** (in 133.18s)
+- `ruff check .`: **All checks passed**
+- `python scripts/read_check.py --seeds 50`: **150 synthetic sheets** (50 per template: `20q_a4`, `50q_a4`, `100q_a4`), **8,500 questions**, **0 failed sheets**, **0 mismatches** (max observed rotation angle 4.991 deg).
+
+Synthetic testing verifies the pipeline against simulated marks and scan artifacts, but it does not prove accuracy on real printed/photographed paper, varied lighting, camera lens distortion, or handwritten names and dates.
+
+## Known limits
+
+- **Flagged-only corrections:** Only questions flagged `ambiguous`, `multiple`, or all-blank can be corrected in review.
+- **Handwriting OCR:** Tesseract OCR is weak on handwriting; use the review screen to fix Name, Date, or Section.
+- **Thresholds & capture conditions:** Bubble fill thresholds are calibrated on synthetic marks only; scans with extreme perspective or very uneven lighting can be rejected (`422`).
+- **Synchronous grading:** Grading runs inside the HTTP request with no background worker or queue.
+- **Upload checks:** Uploads are validated by content type (`image/png`, `image/jpeg`) and size (10 MB max) only.
+- **Deployment & desktop:** No Docker setup yet; the web client runs in a browser only (Tauri desktop packaging is deferred).
 
 ## Project layout
 
-```
+```text
 backend/
   app/
     answer_sheet_templates/   template definitions and geometry
@@ -133,17 +127,12 @@ backend/
     bubble_grading/           bubble classifier and scoring
     grading_pipeline/         grades one scan job end to end
     db/                       SQLite schema and repositories
-    synthetic_sheets/         fake filled-in sheets for tests
+    synthetic_sheets/         synthetic filled-in sheets for tests
     main.py, routers.py       FastAPI app and routes
   data/templates/             printable sheets and template JSON
-  scripts/                    sheet generators
+  scripts/                    template, synthetic sheet, and read-check scripts
+frontend/
+  src/                        Next.js web client
+docs/
+  screenshots/                placeholder folder for UI screenshots
 ```
-
-## Known limits
-
-- Faint marks now go to review (they read as ambiguous, not blank), but the thresholds are
-  calibrated on synthetic marks only and need calibration on real scans.
-- Empty Name, Date and Section boxes skip OCR, and OCR on handwriting is weak. Use the identity endpoint to fix names.
-- Scans taken in very uneven light or with extreme perspective can be rejected.
-- Uploads are checked by content type and size only.
-- Grading runs inside the request. There is no background worker.
