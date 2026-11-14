@@ -575,6 +575,14 @@ def test_get_scan_image_outside_data_dir_returns_404(tmp_path):
         outside_file.unlink(missing_ok=True)
 
 
+def test_backend_test_ui_serves_html() -> None:
+    client = TestClient(app)
+    response = client.get("/test-ui")
+    assert response.status_code == 200
+    assert response.headers.get("content-type", "").startswith("text/html")
+    assert "AutoGradeQuiz Backend Testing UI" in response.text
+
+
 
 
 

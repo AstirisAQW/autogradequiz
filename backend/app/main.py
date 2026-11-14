@@ -1,9 +1,10 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.answer_sheet_templates.exceptions import UnknownTemplateError
 from app.db.connection import init_db
@@ -70,3 +71,8 @@ app.include_router(review_router)
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/test-ui", include_in_schema=False)
+def test_ui() -> HTMLResponse:
+    return HTMLResponse(Path(__file__).with_name("test_ui.html").read_text(encoding="utf-8"))

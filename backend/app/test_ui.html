@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AutoGradeQuiz — Backend Testing UI</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f4f5;
+      --card: #ffffff;
+      --border: #d4d4d8;
+      --text: #18181b;
+      --muted: #52525b;
+      --accent: #18181b;
+      --ok: #15803d;
+      --warn: #b45309;
+      --err: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.4;
+    }
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { margin: 0; font-size: 18px; }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: #fafafa;
+    }
+    .pill.ok { color: var(--ok); border-color: #86efac; background: #f0fdf4; }
+    .pill.err { color: var(--err); border-color: #fca5a5; background: #fef2f2; }
+    .pill.warn { color: var(--warn); border-color: #fcd34d; background: #fffbeb; }
+    main {
+      max-width: 1280px;
+      margin: 16px auto;
+      padding: 0 16px 32px;
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 16px;
+      align-items: start;
+    }
+    @media (max-width: 960px) {
+      main { grid-template-columns: 1fr; }
+    }
+    .stack { display: grid; gap: 16px; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    h2 { margin: 0 0 10px; font-size: 15px; }
+    label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+    input, select, textarea {
+      width: 100%;
+      padding: 7px 9px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font: inherit;
+      font-size: 13px;
+      background: #fff;
+      color: var(--text);
+    }
+    textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 10px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+    button, a.btn {
+      padding: 7px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    button.secondary, a.btn.secondary {
+      background: #fff;
+      color: var(--text);
+      border-color: var(--border);
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .muted { font-size: 12px; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e4e4e7; vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; }
+    pre {
+      margin: 0;
+      padding: 10px;
+      background: #18181b;
+      color: #f4f4f5;
+      border-radius: 6px;
+      font-size: 12px;
+      overflow: auto;
+      max-height: 460px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .preview {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fafafa;
+      padding: 8px;
+      text-align: center;
+    }
+    .preview img { max-width: 100%; max-height: 340px; object-fit: contain; }
+    .sticky { position: sticky; top: 16px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <h1>AutoGradeQuiz Backend Testing UI</h1>
+      <span id="health-pill" class="pill">Checking /health...</span>
+    </div>
+    <div class="actions" style="margin:0;">
+      <button class="secondary" type="button" onclick="checkHealth()">Ping /health</button>
+      <a class="btn secondary" href="/docs" target="_blank" rel="noopener">OpenAPI /docs</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="stack">
+      <section>
+        <h2>1. Test &amp; Batch</h2>
+        <div class="row">
+          <div>
+            <label for="test-name">Test name</label>
+            <input id="test-name" value="Dev Test" />
+          </div>
+          <div>
+            <label for="template-id">Template</label>
+            <select id="template-id" onchange="fillSampleKey()">
+              <option value="20q_a4">20q_a4 (20 Q)</option>
+              <option value="50q_a4">50q_a4 (50 Q)</option>
+              <option value="100q_a4">100q_a4 (100 Q)</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label for="answer-key">Answer key (letters A-E, spaces/commas ignored)</label>
+          <input id="answer-key" value="ABCDEABCDEABCDEABCDE" />
+        </div>
+        <div class="actions">
+          <button type="button" onclick="createTest()">POST /tests</button>
+          <button class="secondary" type="button" onclick="fillSampleKey()">Fill repeating A-E</button>
+        </div>
+        <div class="row" style="margin-top:12px;">
+          <div>
+            <label for="test-id">Active Test ID</label>
+            <input id="test-id" type="number" min="1" placeholder="e.g. 1" />
+          </div>
+          <div>
+            <label for="batch-id">Active Batch ID</label>
+            <input id="batch-id" type="number" min="1" placeholder="e.g. 1" oninput="updateCsvLink()" />
+          </div>
+        </div>
+        <div class="actions">
+          <button type="button" onclick="createBatch()">POST /tests/{id}/batches</button>
+          <button class="secondary" type="button" onclick="loadResults()">GET /batches/{id}/results</button>
+          <a id="csv-link" class="btn secondary" href="#" target="_blank" rel="noopener">GET export.csv</a>
+        </div>
+      </section>
+
+      <section>
+        <h2>2. Upload &amp; Grade Scan</h2>
+        <div class="row">
+          <div>
+            <label for="scan-file">Scan image (PNG or JPEG)</label>
+            <input id="scan-file" type="file" accept="image/png,image/jpeg" multiple />
+          </div>
+          <div>
+            <label for="scan-job-id">Active Scan Job ID</label>
+            <input id="scan-job-id" type="number" min="1" placeholder="e.g. 1" />
+          </div>
+        </div>
+        <div class="actions">
+          <button id="btn-upload-grade" type="button" onclick="uploadAndGradeAll()">Upload + Grade selected</button>
+          <button class="secondary" type="button" onclick="uploadOnly()">POST /batches/{id}/scans</button>
+          <button class="secondary" type="button" onclick="gradeScan(false)">POST /scans/{id}/grade</button>
+          <button class="secondary" type="button" onclick="gradeScan(true)">Regrade (?force=true)</button>
+        </div>
+        <div id="batch-results"></div>
+      </section>
+
+      <section>
+        <h2>3. Review Queue, Corrections &amp; Identity</h2>
+        <div class="actions" style="margin-top:0;margin-bottom:10px;">
+          <button type="button" onclick="loadReviewQueue()">GET /review-queue</button>
+          <button class="secondary" type="button" onclick="viewImage()">GET /scans/{id}/image</button>
+        </div>
+        <div id="review-queue"></div>
+        <div class="row" style="margin-top:10px;">
+          <div>
+            <label for="corrections-json">Corrections JSON (for Active Scan Job ID)</label>
+            <input id="corrections-json" value='{"1": "A"}' />
+            <div class="actions">
+              <button type="button" onclick="patchCorrections()">PATCH /scans/{id}/corrections</button>
+            </div>
+          </div>
+          <div>
+            <label>Identity (blank leaves field unchanged if unchecked)</label>
+            <div class="row" style="margin-bottom:6px;">
+              <input id="id-name" placeholder="Name" />
+              <input id="id-date" placeholder="Date" />
+              <input id="id-section" placeholder="Section" />
+            </div>
+            <div class="actions">
+              <button type="button" onclick="patchIdentity()">PATCH /scans/{id}/identity</button>
+            </div>
+          </div>
+        </div>
+        <div id="image-preview" class="preview" style="display:none;"></div>
+      </section>
+    </div>
+
+    <section class="sticky">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <h2 style="margin:0;">Last Response</h2>
+        <span id="resp-meta" class="muted">No request yet</span>
+      </div>
+      <pre id="resp-body">Click any action on the left to inspect the raw API response.</pre>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+    ));
+
+    function templateCount(tpl) {
+      return tpl === "100q_a4" ? 100 : tpl === "50q_a4" ? 50 : 20;
+    }
+
+    function fillSampleKey() {
+      const n = templateCount($("template-id").value);
+      $("answer-key").value = "ABCDE".repeat(n / 5);
+    }
+
+    function updateCsvLink() {
+      const id = $("batch-id").value.trim();
+      $("csv-link").href = id ? `/batches/${encodeURIComponent(id)}/export.csv` : "#";
+    }
+
+    async function api(method, url, options = {}) {
+      const t0 = performance.now();
+      try {
+        const res = await fetch(url, options);
+        const ms = Math.round(performance.now() - t0);
+        const text = await res.text();
+        let data = text;
+        try { data = JSON.parse(text); } catch {}
+        $("resp-meta").textContent = `${method} ${url} -> ${res.status} (${ms} ms)`;
+        $("resp-body").textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+        return { ok: res.ok, status: res.status, data };
+      } catch (err) {
+        const ms = Math.round(performance.now() - t0);
+        $("resp-meta").textContent = `${method} ${url} -> NETWORK ERROR (${ms} ms)`;
+        $("resp-body").textContent = String(err);
+        return { ok: false, status: 0, data: null };
+      }
+    }
+
+    async function checkHealth() {
+      const r = await api("GET", "/health");
+      const pill = $("health-pill");
+      if (r.ok) {
+        pill.className = "pill ok";
+        pill.textContent = "Backend OK";
+      } else {
+        pill.className = "pill err";
+        pill.textContent = "Backend unreachable";
+      }
+    }
+
+    async function createTest() {
+      const letters = $("answer-key").value.toUpperCase().replace(/[^A-E]/g, "").split("");
+      const r = await api("POST", "/tests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: $("test-name").value.trim() || "Dev Test",
+          template_id: $("template-id").value,
+          answer_key: letters,
+        }),
+      });
+      if (r.ok && r.data?.id) $("test-id").value = r.data.id;
+    }
+
+    async function createBatch() {
+      const testId = $("test-id").value.trim();
+      if (!testId) return alert("Enter or create a Test ID first.");
+      const r = await api("POST", `/tests/${encodeURIComponent(testId)}/batches`, { method: "POST" });
+      if (r.ok && r.data?.id) {
+        $("batch-id").value = r.data.id;
+        updateCsvLink();
+      }
+    }
+
+    async function uploadFile(batchId, file) {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await api("POST", `/batches/${encodeURIComponent(batchId)}/scans`, {
+        method: "POST",
+        body: fd,
+      });
+      if (r.ok && r.data?.id) $("scan-job-id").value = r.data.id;
+      return r;
+    }
+
+    async function uploadOnly() {
+      const batchId = $("batch-id").value.trim();
+      const file = $("scan-file").files[0];
+      if (!batchId || !file) return alert("Set Batch ID and choose a file first.");
+      await uploadFile(batchId, file);
+      await loadResults();
+    }
+
+    async function gradeScan(force, scanIdOverride) {
+      const scanId = scanIdOverride ?? $("scan-job-id").value.trim();
+      if (!scanId) return alert("Set Scan Job ID first.");
+      $("scan-job-id").value = scanId;
+      await api("POST", `/scans/${encodeURIComponent(scanId)}/grade${force ? "?force=true" : ""}`, {
+        method: "POST",
+      });
+      if ($("batch-id").value.trim()) await loadResults();
+    }
+
+    async function uploadAndGradeAll() {
+      const batchId = $("batch-id").value.trim();
+      const files = Array.from($("scan-file").files || []);
+      if (!batchId || !files.length) return alert("Set Batch ID and choose one or more files.");
+      const btn = $("btn-upload-grade");
+      btn.disabled = true;
+      try {
+        for (const file of files) {
+          const up = await uploadFile(batchId, file);
+          if (up.ok && up.data?.id) {
+            await api("POST", `/scans/${up.data.id}/grade`, { method: "POST" });
+          }
+        }
+        await loadResults();
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function loadResults() {
+      const batchId = $("batch-id").value.trim();
+      if (!batchId) return alert("Set Batch ID first.");
+      updateCsvLink();
+      const r = await api("GET", `/batches/${encodeURIComponent(batchId)}/results`);
+      const el = $("batch-results");
+      if (!r.ok || !Array.isArray(r.data)) { el.innerHTML = ""; return; }
+      if (!r.data.length) {
+        el.innerHTML = `<p class="muted">No scans in batch #${esc(batchId)} yet.</p>`;
+        return;
+      }
+      el.innerHTML = `<table>
+        <thead><tr><th>Scan</th><th>Status</th><th>Score</th><th>Flags</th><th>Identity</th><th>Actions</th></tr></thead>
+        <tbody>${r.data.map((row) => `<tr>
+          <td>#${esc(row.scan_job_id)}</td>
+          <td>${esc(row.status)}${row.error_message ? `<div class="muted">${esc(row.error_message)}</div>` : ""}</td>
+          <td>${row.status === "done" ? `${Number(row.score).toFixed(1)}%` : "-"}</td>
+          <td>${row.needs_review ? '<span class="pill warn">Needs review</span>' : (row.status === "done" ? '<span class="pill ok">OK</span>' : "-")}</td>
+          <td>${esc([row.name_text, row.date_text, row.section_text].filter(Boolean).join(" / ") || "-")}</td>
+          <td>
+            <button class="secondary" type="button" onclick="gradeScan(${row.status === "done"}, ${Number(row.scan_job_id)})">${row.status === "done" ? "Regrade" : "Grade"}</button>
+            <button class="secondary" type="button" onclick="viewImage(${Number(row.scan_job_id)})">Image</button>
+          </td>
+        </tr>`).join("")}</tbody>
+      </table>`;
+    }
+
+    async function loadReviewQueue() {
+      const r = await api("GET", "/review-queue");
+      const el = $("review-queue");
+      if (!r.ok || !Array.isArray(r.data)) { el.innerHTML = ""; return; }
+      if (!r.data.length) {
+        el.innerHTML = `<p class="muted">Review queue is empty.</p>`;
+        return;
+      }
+      el.innerHTML = `<table>
+        <thead><tr><th>Scan</th><th>Score</th><th>Flags JSON</th><th>Actions</th></tr></thead>
+        <tbody>${r.data.map((row) => `<tr>
+          <td>#${esc(row.scan_job_id)}</td>
+          <td>${Number(row.score).toFixed(1)}%</td>
+          <td><code>${esc(row.flags_json)}</code></td>
+          <td>
+            <button class="secondary" type="button" onclick="selectForReview(${Number(row.scan_job_id)})">Select</button>
+            <button class="secondary" type="button" onclick="viewImage(${Number(row.scan_job_id)})">Image</button>
+          </td>
+        </tr>`).join("")}</tbody>
+      </table>`;
+    }
+
+    function selectForReview(scanId) {
+      $("scan-job-id").value = scanId;
+      viewImage(scanId);
+    }
+
+    function viewImage(scanIdOverride) {
+      const scanId = scanIdOverride ?? $("scan-job-id").value.trim();
+      if (!scanId) return alert("Set Scan Job ID first.");
+      $("scan-job-id").value = scanId;
+      const box = $("image-preview");
+      const src = `/scans/${encodeURIComponent(scanId)}/image?t=${Date.now()}`;
+      box.style.display = "block";
+      box.innerHTML = `<img src="${src}" alt="Scan ${esc(scanId)}" onerror="this.outerHTML='<p class=muted>Image not available (404).</p>'" />`;
+    }
+
+    async function patchCorrections() {
+      const scanId = $("scan-job-id").value.trim();
+      if (!scanId) return alert("Set Scan Job ID first.");
+      let parsed;
+      try {
+        parsed = JSON.parse($("corrections-json").value);
+      } catch (e) {
+        return alert("Invalid JSON in Corrections: " + e.message);
+      }
+      await api("PATCH", `/scans/${encodeURIComponent(scanId)}/corrections`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ corrections: parsed }),
+      });
+    }
+
+    async function patchIdentity() {
+      const scanId = $("scan-job-id").value.trim();
+      if (!scanId) return alert("Set Scan Job ID first.");
+      const payload = {
+        name_text: $("id-name").value,
+        date_text: $("id-date").value,
+        section_text: $("id-section").value,
+      };
+      await api("PATCH", `/scans/${encodeURIComponent(scanId)}/identity`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    }
+
+    checkHealth();
+    updateCsvLink();
+  </script>
+</body>
+</html>

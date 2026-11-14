@@ -34,6 +34,7 @@ where = ["."]
 include = ["app*"]
 
 [tool.setuptools.package-data]
+"app" = ["test_ui.html"]
 "app.db" = ["schema.sql"]
 
 [tool.pytest.ini_options]
