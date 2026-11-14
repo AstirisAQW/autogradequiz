@@ -63,6 +63,7 @@ export default function Home() {
   const [rawAnswerKey, setRawAnswerKey] = useState("");
   const [activeTest, setActiveTest] = useState<TestRecord | null>(null);
   const [activeBatch, setActiveBatch] = useState<BatchRecord | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
   const [submittingTest, setSubmittingTest] = useState(false);
   const [submittingBatch, setSubmittingBatch] = useState(false);
   const [resultsVersion, setResultsVersion] = useState(0);
@@ -75,6 +76,7 @@ export default function Home() {
       const saved = readSession();
       setActiveTest(saved.test);
       setActiveBatch(saved.batch);
+      setSessionReady(true);
     });
 
     getHealth()
@@ -258,7 +260,7 @@ export default function Home() {
         )}
       </section>
 
-      {activeTest && (
+      {sessionReady && activeTest && (
         <section className="rounded-lg border border-zinc-200 bg-white p-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-1 text-sm">
@@ -300,23 +302,24 @@ export default function Home() {
         </section>
       )}
 
-      {activeBatch ? (
-        <>
-          <BatchUploadGrader
-            key={activeBatch.id}
-            batchId={activeBatch.id}
-            onRunFinished={() => setResultsVersion((v) => v + 1)}
-          />
-          <BatchResultsTable
-            batchId={activeBatch.id}
-            refreshTrigger={resultsVersion}
-          />
-        </>
-      ) : (
-        <section className="rounded-lg border border-dashed border-zinc-300 bg-white p-6 text-sm text-zinc-600">
-          Create a batch first.
-        </section>
-      )}
+      {sessionReady &&
+        (activeBatch ? (
+          <>
+            <BatchUploadGrader
+              key={activeBatch.id}
+              batchId={activeBatch.id}
+              onRunFinished={() => setResultsVersion((v) => v + 1)}
+            />
+            <BatchResultsTable
+              batchId={activeBatch.id}
+              refreshTrigger={resultsVersion}
+            />
+          </>
+        ) : (
+          <section className="rounded-lg border border-dashed border-zinc-300 bg-white p-6 text-sm text-zinc-600">
+            Create a batch first.
+          </section>
+        ))}
     </div>
   );
 }
