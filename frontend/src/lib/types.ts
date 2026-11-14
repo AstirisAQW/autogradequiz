@@ -49,7 +49,7 @@ export interface ScanResultRecord {
   processed_image_path: string;
   error_message: string;
   created_at: string;
-  status: string;
+  status: ScanJobStatus;
 }
 
 export interface ScanFlags {

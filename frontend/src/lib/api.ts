@@ -24,6 +24,10 @@ export class ApiError extends Error {
 }
 
 async function extractErrorDetail(response: Response): Promise<string> {
+  if (response.status >= 500) {
+    return "The server had an error. Check the backend terminal.";
+  }
+
   const fallback = `Request failed (${response.status})`;
   const text = await response.text().catch(() => "");
   if (!text) {
