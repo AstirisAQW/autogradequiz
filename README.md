@@ -143,7 +143,7 @@ backend/
 
 - Faint marks now go to review (they read as ambiguous, not blank), but the thresholds are
   calibrated on synthetic marks only and need calibration on real scans.
-- OCR on handwriting is weak. Use the identity endpoint to fix names.
+- Empty Name, Date and Section boxes skip OCR, and OCR on handwriting is weak. Use the identity endpoint to fix names.
 - Scans taken in very uneven light or with extreme perspective can be rejected.
 - Uploads are checked by content type and size only.
 - Grading runs inside the request. There is no background worker.

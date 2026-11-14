@@ -17,7 +17,7 @@ import pytesseract
 from app.answer_sheet_templates.builder import DEFAULT_TEXT_FIELDS, PAGE
 from app.answer_sheet_templates.catalog import get_template_spec
 from app.answer_sheet_templates.geometry import PageSize, mm_to_px
-from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_sheet
+from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_sheet, to_grayscale
 from app.bubble_grading.scoring import score_sheet
 from app.config import get_settings
 from app.db.exceptions import ScanResultNotFoundError
@@ -72,6 +72,24 @@ def scan_job_needs_review(question_fills: dict[int, QuestionFill]) -> bool:
     ) or all(fill.result == BubbleResult.BLANK for fill in question_fills.values())
 
 
+TEXT_BOX_OCR_INSET_PX = 8
+TEXT_BOX_INK_INSET_PX = 16
+TEXT_BOX_INK_DARK_OFFSET = 50
+TEXT_BOX_MIN_INK_SHARE = 0.01
+
+
+def _box_has_ink(image: np.ndarray, x0: int, y0: int, x1: int, y1: int) -> bool:
+    interior = image[
+        y0 + TEXT_BOX_INK_INSET_PX : y1 - TEXT_BOX_INK_INSET_PX,
+        x0 + TEXT_BOX_INK_INSET_PX : x1 - TEXT_BOX_INK_INSET_PX,
+    ]
+    if interior.size == 0:
+        return False
+    gray = to_grayscale(interior)
+    dark_share = float(np.mean(gray < float(np.median(gray)) - TEXT_BOX_INK_DARK_OFFSET))
+    return dark_share >= TEXT_BOX_MIN_INK_SHARE
+
+
 def read_text_fields(image: np.ndarray, page: PageSize = PAGE) -> dict[str, str]:
     settings = get_settings()
     if settings.tesseract_cmd:
@@ -80,9 +98,16 @@ def read_text_fields(image: np.ndarray, page: PageSize = PAGE) -> dict[str, str]
     for field in DEFAULT_TEXT_FIELDS:
         x0, y0 = mm_to_px(field.x_mm, field.y_mm, page)
         x1, y1 = mm_to_px(field.x_mm + field.width_mm, field.y_mm + field.height_mm, page)
-        crop = image[y0 + 8 : y1 - 8, x0 + 8 : x1 - 8]
+        if not _box_has_ink(image, x0, y0, x1, y1):
+            values[field.id] = ""
+            continue
+        crop = image[
+            y0 + TEXT_BOX_OCR_INSET_PX : y1 - TEXT_BOX_OCR_INSET_PX,
+            x0 + TEXT_BOX_OCR_INSET_PX : x1 - TEXT_BOX_OCR_INSET_PX,
+        ]
         try:
-            values[field.id] = pytesseract.image_to_string(crop, config="--psm 7").strip()
+            text = pytesseract.image_to_string(crop, config="--psm 7").strip()
+            values[field.id] = text if sum(1 for ch in text if ch.isalnum()) >= 2 else ""
         except Exception:
             values[field.id] = ""
     return values

@@ -285,6 +285,59 @@ def test_grade_scan_job_succeeds_when_ocr_raises(tmp_path, monkeypatch):
     assert (result.name_text, result.date_text, result.section_text) == ("", "", "")
 
 
+def test_empty_text_boxes_skip_ocr(tmp_path, monkeypatch):
+    import pytesseract
+
+    def _should_not_be_called(*_args, **_kwargs):
+        raise AssertionError("OCR should not run on empty text boxes")
+
+    monkeypatch.setattr(pytesseract, "image_to_string", _should_not_be_called)
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1)
+    scan_job = _create_scan_job(tmp_path, sheet)
+
+    result = grade_scan_job(scan_job.id)
+
+    assert (result.name_text, result.date_text, result.section_text) == ("", "", "")
+
+
+def test_text_box_with_ink_calls_ocr_and_drops_single_char(tmp_path, monkeypatch):
+    import pytesseract
+
+    name_field = next(field for field in DEFAULT_TEXT_FIELDS if field.id == "name")
+    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1)
+    canvas = _aligned_image_against_key(TWENTY_QUESTIONS, seed=3, answer_key=sheet.answer_key)
+    x0, _ = mm_to_px(name_field.x_mm, name_field.y_mm, PAGE)
+    _, y1 = mm_to_px(
+        name_field.x_mm + name_field.width_mm,
+        name_field.y_mm + name_field.height_mm,
+        PAGE,
+    )
+    cv2.putText(canvas, "Ana Cruz", (x0 + 20, y1 - 25), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 3)
+
+    image_path = tmp_path / "name_only.png"
+    cv2.imwrite(str(image_path), canvas)
+    scan_job = _create_scan_job(tmp_path, sheet, image_path=image_path)
+
+    calls = 0
+
+    def _fake_ocr(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return "Ana Cruz"
+
+    monkeypatch.setattr(pytesseract, "image_to_string", _fake_ocr)
+    result = grade_scan_job(scan_job.id)
+
+    assert calls == 1
+    assert result.name_text == "Ana Cruz"
+    assert (result.date_text, result.section_text) == ("", "")
+
+    from app.grading_pipeline.grade_scan_job import read_text_fields
+
+    monkeypatch.setattr(pytesseract, "image_to_string", lambda *_a, **_kw: " x ")
+    assert read_text_fields(canvas)["name"] == ""
+
+
 def test_grade_scan_job_correct_then_forced_regrade_keeps_100(tmp_path):
     sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1)
     scan_job = _create_scan_job(tmp_path, sheet)
