@@ -580,7 +580,33 @@ def test_backend_test_ui_serves_html() -> None:
     response = client.get("/test-ui")
     assert response.status_code == 200
     assert response.headers.get("content-type", "").startswith("text/html")
-    assert "AutoGradeQuiz Backend Testing UI" in response.text
+    assert "AutoGradeQuiz Backend Sandbox" in response.text
+
+
+def test_test_ui_synthetic_sheet_download_and_grade(isolated_database: Any) -> None:
+    client = TestClient(app)
+
+    png_resp = client.get("/test-ui/synthetic-sheet?template_id=20q_a4&seed=0")
+    assert png_resp.status_code == 200
+    assert png_resp.headers.get("content-type") == "image/png"
+    assert png_resp.content.startswith(b"\x89PNG")
+
+    test_id = client.post(
+        "/tests",
+        json={"name": "Sandbox Quiz", "template_id": "20q_a4", "answer_key": ["A"] * 20},
+    ).json()["id"]
+    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
+
+    gen_resp = client.post(
+        f"/test-ui/batches/{batch_id}/synthetic-scans",
+        json={"seed": 0, "grade": True},
+    )
+    assert gen_resp.status_code == 200
+    payload = gen_resp.json()
+    assert payload["seed"] == 0
+    assert len(payload["marked_choices"]) == 20
+    assert payload["result"]["status"] == "done"
+    assert payload["result"]["scan_job_id"] == payload["scan_job_id"]
 
 
 
