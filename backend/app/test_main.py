@@ -577,6 +577,13 @@ def test_get_scan_image_outside_data_dir_returns_404(tmp_path):
 
 def test_backend_test_ui_serves_html() -> None:
     client = TestClient(app)
+    root_resp = client.get("/")
+    assert root_resp.status_code == 307
+    assert root_resp.headers.get("location") == "/test-ui"
+
+    fav_resp = client.get("/favicon.ico")
+    assert fav_resp.status_code == 204
+
     response = client.get("/test-ui")
     assert response.status_code == 200
     assert response.headers.get("content-type", "").startswith("text/html")

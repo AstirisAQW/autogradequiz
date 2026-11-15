@@ -6,7 +6,7 @@ from uuid import uuid4
 import cv2
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from app.answer_sheet_templates.catalog import get_template_spec
@@ -75,6 +75,16 @@ app.include_router(tests_router)
 app.include_router(batches_router)
 app.include_router(scans_router)
 app.include_router(review_router)
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    return RedirectResponse(url="/test-ui")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return Response(status_code=204)
 
 
 @app.get("/health")
