@@ -15,92 +15,474 @@
     "blank": {
       "count": 521,
       "correct": 521,
+      "candidate_correct": null,
+      "accepted": 0,
       "flagged": 0,
       "wrong_and_unflagged": 0,
+      "read_blank": 0,
+      "read_wrong_letter": 0,
       "correct_pct": 100.0,
+      "candidate_correct_pct": null,
+      "accepted_pct": 0.0,
       "flagged_pct": 0.0,
       "wrong_and_unflagged_pct": 0.0
     },
     "checkmark": {
       "count": 215,
       "correct": 0,
+      "candidate_correct": 215,
+      "accepted": 0,
       "flagged": 215,
       "wrong_and_unflagged": 0,
+      "read_blank": 0,
+      "read_wrong_letter": 0,
       "correct_pct": 0.0,
+      "candidate_correct_pct": 100.0,
+      "accepted_pct": 0.0,
       "flagged_pct": 100.0,
       "wrong_and_unflagged_pct": 0.0
     },
     "double": {
       "count": 333,
       "correct": 333,
+      "candidate_correct": null,
+      "accepted": 0,
       "flagged": 333,
       "wrong_and_unflagged": 0,
+      "read_blank": 0,
+      "read_wrong_letter": 0,
       "correct_pct": 100.0,
+      "candidate_correct_pct": null,
+      "accepted_pct": 0.0,
       "flagged_pct": 100.0,
       "wrong_and_unflagged_pct": 0.0
     },
     "half_fill": {
       "count": 498,
       "correct": 0,
+      "candidate_correct": 498,
+      "accepted": 0,
       "flagged": 498,
       "wrong_and_unflagged": 0,
+      "read_blank": 0,
+      "read_wrong_letter": 0,
       "correct_pct": 0.0,
+      "candidate_correct_pct": 100.0,
+      "accepted_pct": 0.0,
       "flagged_pct": 100.0,
       "wrong_and_unflagged_pct": 0.0
     },
     "light_gray": {
       "count": 463,
       "correct": 12,
+      "candidate_correct": 391,
+      "accepted": 12,
       "flagged": 379,
       "wrong_and_unflagged": 72,
+      "read_blank": 72,
+      "read_wrong_letter": 0,
       "correct_pct": 2.59,
+      "candidate_correct_pct": 84.45,
+      "accepted_pct": 2.59,
       "flagged_pct": 81.86,
       "wrong_and_unflagged_pct": 15.55
     },
     "mid_gray": {
       "count": 421,
       "correct": 282,
+      "candidate_correct": 421,
+      "accepted": 282,
       "flagged": 139,
       "wrong_and_unflagged": 0,
+      "read_blank": 0,
+      "read_wrong_letter": 0,
       "correct_pct": 66.98,
+      "candidate_correct_pct": 100.0,
+      "accepted_pct": 66.98,
       "flagged_pct": 33.02,
       "wrong_and_unflagged_pct": 0.0
     },
     "scribble": {
       "count": 184,
       "correct": 0,
+      "candidate_correct": 184,
+      "accepted": 0,
       "flagged": 184,
       "wrong_and_unflagged": 0,
+      "read_blank": 0,
+      "read_wrong_letter": 0,
       "correct_pct": 0.0,
+      "candidate_correct_pct": 100.0,
+      "accepted_pct": 0.0,
       "flagged_pct": 100.0,
       "wrong_and_unflagged_pct": 0.0
     },
     "small_dot": {
       "count": 504,
       "correct": 0,
+      "candidate_correct": 504,
+      "accepted": 0,
       "flagged": 504,
       "wrong_and_unflagged": 0,
+      "read_blank": 0,
+      "read_wrong_letter": 0,
       "correct_pct": 0.0,
+      "candidate_correct_pct": 100.0,
+      "accepted_pct": 0.0,
       "flagged_pct": 100.0,
       "wrong_and_unflagged_pct": 0.0
     },
     "solid": {
       "count": 5163,
       "correct": 5163,
+      "candidate_correct": 5163,
+      "accepted": 5163,
       "flagged": 0,
       "wrong_and_unflagged": 0,
+      "read_blank": 0,
+      "read_wrong_letter": 0,
       "correct_pct": 100.0,
+      "candidate_correct_pct": 100.0,
+      "accepted_pct": 100.0,
       "flagged_pct": 0.0,
       "wrong_and_unflagged_pct": 0.0
     },
     "x_mark": {
       "count": 198,
       "correct": 0,
+      "candidate_correct": 198,
+      "accepted": 0,
       "flagged": 198,
       "wrong_and_unflagged": 0,
+      "read_blank": 0,
+      "read_wrong_letter": 0,
       "correct_pct": 0.0,
+      "candidate_correct_pct": 100.0,
+      "accepted_pct": 0.0,
       "flagged_pct": 100.0,
       "wrong_and_unflagged_pct": 0.0
     }
-  }
+  },
+  "light_gray_worst_10": [
+    {
+      "seed": 48,
+      "template_id": "20q_a4",
+      "question_number": 3,
+      "truth_choice": "E",
+      "result": "blank",
+      "marked_choices": [],
+      "truth_trace_ratio": 0.0,
+      "truth_fill_ratio": 0.0,
+      "bubbles": {
+        "A": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "B": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "C": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "D": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "E": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        }
+      }
+    },
+    {
+      "seed": 4,
+      "template_id": "50q_a4",
+      "question_number": 29,
+      "truth_choice": "A",
+      "result": "blank",
+      "marked_choices": [],
+      "truth_trace_ratio": 0.0,
+      "truth_fill_ratio": 0.0,
+      "bubbles": {
+        "A": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "B": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "C": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "D": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "E": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        }
+      }
+    },
+    {
+      "seed": 10,
+      "template_id": "50q_a4",
+      "question_number": 33,
+      "truth_choice": "B",
+      "result": "blank",
+      "marked_choices": [],
+      "truth_trace_ratio": 0.0,
+      "truth_fill_ratio": 0.0,
+      "bubbles": {
+        "A": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "B": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "C": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "D": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "E": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        }
+      }
+    },
+    {
+      "seed": 10,
+      "template_id": "50q_a4",
+      "question_number": 50,
+      "truth_choice": "A",
+      "result": "blank",
+      "marked_choices": [],
+      "truth_trace_ratio": 0.0,
+      "truth_fill_ratio": 0.0,
+      "bubbles": {
+        "A": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "B": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "C": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "D": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "E": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        }
+      }
+    },
+    {
+      "seed": 11,
+      "template_id": "50q_a4",
+      "question_number": 7,
+      "truth_choice": "E",
+      "result": "blank",
+      "marked_choices": [],
+      "truth_trace_ratio": 0.0,
+      "truth_fill_ratio": 0.0,
+      "bubbles": {
+        "A": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "B": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "C": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "D": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "E": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        }
+      }
+    },
+    {
+      "seed": 11,
+      "template_id": "50q_a4",
+      "question_number": 9,
+      "truth_choice": "C",
+      "result": "blank",
+      "marked_choices": [],
+      "truth_trace_ratio": 0.0,
+      "truth_fill_ratio": 0.0,
+      "bubbles": {
+        "A": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "B": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "C": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "D": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "E": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        }
+      }
+    },
+    {
+      "seed": 11,
+      "template_id": "50q_a4",
+      "question_number": 25,
+      "truth_choice": "A",
+      "result": "blank",
+      "marked_choices": [],
+      "truth_trace_ratio": 0.0,
+      "truth_fill_ratio": 0.0,
+      "bubbles": {
+        "A": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "B": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "C": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "D": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "E": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        }
+      }
+    },
+    {
+      "seed": 48,
+      "template_id": "50q_a4",
+      "question_number": 3,
+      "truth_choice": "E",
+      "result": "blank",
+      "marked_choices": [],
+      "truth_trace_ratio": 0.0,
+      "truth_fill_ratio": 0.0,
+      "bubbles": {
+        "A": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "B": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "C": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "D": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "E": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        }
+      }
+    },
+    {
+      "seed": 48,
+      "template_id": "50q_a4",
+      "question_number": 12,
+      "truth_choice": "D",
+      "result": "blank",
+      "marked_choices": [],
+      "truth_trace_ratio": 0.0,
+      "truth_fill_ratio": 0.0,
+      "bubbles": {
+        "A": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "B": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "C": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "D": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "E": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        }
+      }
+    },
+    {
+      "seed": 0,
+      "template_id": "100q_a4",
+      "question_number": 17,
+      "truth_choice": "B",
+      "result": "blank",
+      "marked_choices": [],
+      "truth_trace_ratio": 0.0,
+      "truth_fill_ratio": 0.0,
+      "bubbles": {
+        "A": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "B": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "C": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "D": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        },
+        "E": {
+          "fill_ratio": 0.0,
+          "trace_ratio": 0.0
+        }
+      }
+    }
+  ]
 }

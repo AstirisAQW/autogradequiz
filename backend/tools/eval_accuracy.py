@@ -34,6 +34,16 @@ def _is_correct_read(plan: QuestionPlan, mark_type: str, fill: QuestionFill) -> 
     return fill.result == BubbleResult.FILLED and fill.marked_choices == plan.marked_choices
 
 
+def _bubble_ratios(fill: QuestionFill) -> dict[str, dict[str, float]]:
+    return {
+        choice: {
+            "fill_ratio": round(bf.fill_ratio, 4),
+            "trace_ratio": round(bf.trace_ratio, 4),
+        }
+        for choice, bf in fill.bubble_fills
+    }
+
+
 def evaluate_accuracy(
     seeds: int = 50,
     template_ids: list[str] | None = None,
@@ -45,12 +55,22 @@ def evaluate_accuracy(
     )
 
     stats: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"count": 0, "correct": 0, "flagged": 0, "wrong_and_unflagged": 0}
+        lambda: {
+            "count": 0,
+            "correct": 0,
+            "candidate_correct": 0,
+            "accepted": 0,
+            "flagged": 0,
+            "wrong_and_unflagged": 0,
+            "read_blank": 0,
+            "read_wrong_letter": 0,
+        }
     )
     total_sheets = 0
     alignment_failures: list[dict[str, Any]] = []
     total_questions = 0
     total_flagged = 0
+    light_gray_misses: list[dict[str, Any]] = []
 
     for spec in specs:
         for seed in range(seeds):
@@ -83,19 +103,61 @@ def evaluate_accuracy(
                     total_flagged += 1
                 if correct:
                     row["correct"] += 1
+
+                if mark_type not in ("blank", "double"):
+                    truth_choice = plan.marked_choices[0]
+                    if truth_choice in fill.marked_choices:
+                        row["candidate_correct"] += 1
+                    if fill.result == BubbleResult.FILLED and fill.marked_choices == (
+                        truth_choice,
+                    ):
+                        row["accepted"] += 1
+
                 if (not flagged) and (not correct):
                     row["wrong_and_unflagged"] += 1
+                    if fill.result == BubbleResult.BLANK:
+                        row["read_blank"] += 1
+                    elif fill.result == BubbleResult.FILLED:
+                        row["read_wrong_letter"] += 1
+
+                    if mark_type == "light_gray":
+                        bubbles = _bubble_ratios(fill)
+                        truth_choice = plan.marked_choices[0]
+                        light_gray_misses.append(
+                            {
+                                "seed": seed,
+                                "template_id": spec.template_id,
+                                "question_number": plan.question_number,
+                                "truth_choice": truth_choice,
+                                "result": fill.result.value,
+                                "marked_choices": list(fill.marked_choices),
+                                "truth_trace_ratio": bubbles[truth_choice]["trace_ratio"],
+                                "truth_fill_ratio": bubbles[truth_choice]["fill_ratio"],
+                                "bubbles": bubbles,
+                            }
+                        )
+
+    light_gray_misses.sort(key=lambda m: (m["truth_trace_ratio"], m["truth_fill_ratio"]))
 
     per_mark_type: dict[str, dict[str, Any]] = {}
     for mark_type in sorted(stats):
         row = stats[mark_type]
         n = row["count"]
+        is_single = mark_type not in ("blank", "double")
         per_mark_type[mark_type] = {
             "count": n,
             "correct": row["correct"],
+            "candidate_correct": row["candidate_correct"] if is_single else None,
+            "accepted": row["accepted"],
             "flagged": row["flagged"],
             "wrong_and_unflagged": row["wrong_and_unflagged"],
+            "read_blank": row["read_blank"],
+            "read_wrong_letter": row["read_wrong_letter"],
             "correct_pct": round(100.0 * row["correct"] / n, 2) if n else 0.0,
+            "candidate_correct_pct": (
+                round(100.0 * row["candidate_correct"] / n, 2) if (n and is_single) else None
+            ),
+            "accepted_pct": round(100.0 * row["accepted"] / n, 2) if n else 0.0,
             "flagged_pct": round(100.0 * row["flagged"] / n, 2) if n else 0.0,
             "wrong_and_unflagged_pct": (
                 round(100.0 * row["wrong_and_unflagged"] / n, 2) if n else 0.0
@@ -114,6 +176,7 @@ def evaluate_accuracy(
             round(100.0 * total_flagged / total_questions, 2) if total_questions else 0.0
         ),
         "per_mark_type": per_mark_type,
+        "light_gray_worst_10": light_gray_misses[:10],
     }
 
 
@@ -128,18 +191,54 @@ def format_report(report: dict[str, Any]) -> str:
         ),
         "",
         (
-            f"{'mark_type':<14} {'count':>7} {'correct%':>10} "
-            f"{'flagged%':>10} {'wrong_unflagged%':>18}"
+            f"{'mark_type':<12} {'count':>6} {'correct%':>9} {'cand_ok%':>9} "
+            f"{'accepted%':>10} {'flagged%':>9} {'wrong_unflg%':>13}"
         ),
-        "-" * 63,
+        "-" * 74,
     ]
     for mark_type, row in report["per_mark_type"].items():
-        lines.append(
-            f"{mark_type:<14} {row['count']:>7d} "
-            f"{row['correct_pct']:>9.2f}% "
-            f"{row['flagged_pct']:>9.2f}% "
-            f"{row['wrong_and_unflagged_pct']:>17.2f}%"
+        cand_str = (
+            f"{row['candidate_correct_pct']:>8.2f}%"
+            if row["candidate_correct_pct"] is not None
+            else f"{'-':>9}"
         )
+        lines.append(
+            f"{mark_type:<12} {row['count']:>6d} "
+            f"{row['correct_pct']:>8.2f}% "
+            f"{cand_str} "
+            f"{row['accepted_pct']:>9.2f}% "
+            f"{row['flagged_pct']:>8.2f}% "
+            f"{row['wrong_and_unflagged_pct']:>12.2f}%"
+        )
+
+    lines.append("")
+    lines.append("Wrong-and-unflagged breakdown:")
+    any_wrong = False
+    for mark_type, row in report["per_mark_type"].items():
+        if row["wrong_and_unflagged"] > 0 or mark_type == "light_gray":
+            any_wrong = True
+            lines.append(
+                f"  {mark_type}: total={row['wrong_and_unflagged']} "
+                f"(read_blank={row['read_blank']}, "
+                f"read_wrong_letter={row['read_wrong_letter']})"
+            )
+    if not any_wrong:
+        lines.append("  none")
+
+    worst = report.get("light_gray_worst_10", [])
+    if worst:
+        lines.append("")
+        lines.append("Worst 10 light_gray wrong-and-unflagged examples:")
+        for ex in worst:
+            ratios = " ".join(
+                f"{c}={vals['fill_ratio']:.3f}/{vals['trace_ratio']:.3f}"
+                for c, vals in ex["bubbles"].items()
+            )
+            lines.append(
+                f"  seed={ex['seed']} {ex['template_id']} Q{ex['question_number']} "
+                f"truth={ex['truth_choice']} read={ex['result']}({','.join(ex['marked_choices'])}) "
+                f"[fill/trace: {ratios}]"
+            )
     return "\n".join(lines)
 
 
