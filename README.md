@@ -4,7 +4,9 @@ AutoGradeQuiz grades multiple-choice answer sheets from scanned or photographed 
 
 > **Status:** Backend and web client v1 are done. Tested on synthetic sheets only; not yet calibrated on real scans.
 
-## How one sheet moves through the app
+- [Part 1: Backend (FastAPI + OpenCV + Tesseract)](#part-1-backend)
+- [Part 2: Frontend (Next.js Web Client)](#part-2-frontend)
+- [Project layout](#project-layout)
 
 ```mermaid
 flowchart LR
@@ -17,15 +19,15 @@ flowchart LR
     V --> E["Export CSV"]
 ```
 
-## Run it (Windows)
+---
+
+## Part 1: Backend
 
 ### Requirements
-
 - Python 3.13+
-- Node.js 20+ and npm
 - [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) (needed only to read Name, Date, and Section). Set `TESSERACT_CMD` to `tesseract.exe` if it is not on `PATH`.
 
-### 1. Backend API
+### Setup & run (Windows)
 
 ```powershell
 cd backend
@@ -37,19 +39,7 @@ uvicorn app.main:app --reload
 
 API docs: <http://127.0.0.1:8000/docs> (`GET /health` for health check). Uploads and SQLite data live under `backend/data/`.
 
-### 2. Web client
-
-```powershell
-cd frontend
-npm install
-npm run dev
-```
-
-Open <http://localhost:3000>.
-
-### 3. Try the demo
-
-Generate sample filled-in sheets (requires the backend `.venv` activated and `PYTHONPATH=.` if not installed editable):
+### Generate templates & synthetic sheets
 
 ```powershell
 cd backend
@@ -58,25 +48,9 @@ python scripts/generate_templates.py
 python scripts/generate_synthetic_sheets.py --templates 20q_a4 --count 5
 ```
 
-1. Print templates land in `backend/data/templates/` (print at 100% scale; never use "fit to page").
-2. Synthetic sample sheets land in `backend/data/synthetic_sheets/20q_a4/`.
-3. Open <http://localhost:3000>, create a test (`20q_a4`) and a batch, upload the generated PNGs, and click **Upload and grade**.
+Print templates land in `backend/data/templates/` (print at 100% scale; never use "fit to page"). Synthetic sheets land in `backend/data/synthetic_sheets/20q_a4/`. Set `PYTHONPATH=.` if `backend` is not editable-installed.
 
-## Screens
-
-- **Home (test, batch & upload):** Create a test with its template (`20q_a4`, `50q_a4`, `100q_a4`) and answer key, create a batch, then select multiple PNG/JPEG scans to upload and grade sequentially.
-
-  ![Home screen](docs/screenshots/home.png)
-
-- **Results:** View every scan in the active batch with score, status, and review badge, regrade individual rows, and export the batch to CSV.
-
-  ![Results table](docs/screenshots/results.png)
-
-- **Review:** Work through scans flagged `needs_review` side by side with the aligned sheet image, fix flagged answers or identity fields, and save corrections.
-
-  ![Review screen](docs/screenshots/review.png)
-
-## Settings & API overview
+### Settings & API overview
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -97,8 +71,7 @@ python scripts/generate_synthetic_sheets.py --templates 20q_a4 --count 5
 | `PATCH` | `/scans/{scan_job_id}/corrections` | Save answer corrections (`{"corrections": {"1": "B"}}`) |
 | `PATCH` | `/scans/{scan_job_id}/identity` | Update Name, Date, or Section |
 
-## How it was tested
-
+### How the backend was tested
 Run from `backend/` with `.venv` activated (and `PYTHONPATH=.` for `scripts/read_check.py`):
 
 - `pytest`: **121 passed** (in 133.18s)
@@ -107,14 +80,60 @@ Run from `backend/` with `.venv` activated (and `PYTHONPATH=.` for `scripts/read
 
 Synthetic testing verifies the pipeline against simulated marks and scan artifacts, but it does not prove accuracy on real printed/photographed paper, varied lighting, camera lens distortion, or handwritten names and dates.
 
-## Known limits
-
-- **Flagged-only corrections:** Only questions flagged `ambiguous`, `multiple`, or all-blank can be corrected in review.
-- **Handwriting OCR:** Tesseract OCR is weak on handwriting; use the review screen to fix Name, Date, or Section.
+### Backend known limits
+- **Handwriting OCR:** Tesseract OCR is weak on handwriting; use the review screen or `PATCH /scans/{id}/identity` to fix Name, Date, or Section.
 - **Thresholds & capture conditions:** Bubble fill thresholds are calibrated on synthetic marks only; scans with extreme perspective or very uneven lighting can be rejected (`422`).
 - **Synchronous grading:** Grading runs inside the HTTP request with no background worker or queue.
 - **Upload checks:** Uploads are validated by content type (`image/png`, `image/jpeg`) and size (10 MB max) only.
-- **Deployment & desktop:** No Docker setup yet; the web client runs in a browser only (Tauri desktop packaging is deferred).
+- **Deployment:** No Docker setup yet.
+
+---
+
+## Part 2: Frontend
+
+### Requirements
+- Node.js 20+ and npm
+- Running backend API at `http://127.0.0.1:8000` (see Part 1)
+
+### Setup & run (Windows)
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open <http://localhost:3000>.
+
+### Scripts (`frontend/package.json`)
+
+| Script | Command | Purpose |
+| --- | --- | --- |
+| `dev` | `next dev` | Start local Next.js dev server |
+| `build` | `next build` | Production build and TypeScript check |
+| `start` | `next start` | Serve production build |
+| `lint` | `eslint` | Run ESLint |
+| `tauri` | `tauri` | Tauri CLI (desktop packaging deferred) |
+
+### Screens
+
+- **Home (test, batch & upload):** Create a test (`20q_a4`, `50q_a4`, `100q_a4`) and answer key, create a batch, then select multiple PNG/JPEG scans (for example from `backend/data/synthetic_sheets/20q_a4/`) and click **Upload and grade**.
+
+  ![Home screen](docs/screenshots/home.png)
+
+- **Results:** View every scan in the active batch with score, status, and review badge, regrade individual rows, and export the batch to CSV.
+
+  ![Results table](docs/screenshots/results.png)
+
+- **Review:** Work through scans flagged `needs_review` side by side with the aligned sheet image, fix flagged answers or identity fields, and save corrections.
+
+  ![Review screen](docs/screenshots/review.png)
+
+### Frontend known limits
+- **Flagged-only corrections:** Only questions flagged `ambiguous`, `multiple`, or all-blank can be corrected in review.
+- **Browser only:** The web client runs in a browser only (Tauri desktop packaging is deferred).
+
+---
 
 ## Project layout
 
