@@ -1,0 +1,106 @@
+{
+  "seeds": 50,
+  "templates": [
+    "20q_a4",
+    "50q_a4",
+    "100q_a4"
+  ],
+  "total_sheets": 150,
+  "alignment_failures": [],
+  "alignment_failure_count": 0,
+  "total_questions": 8500,
+  "overall_flagged": 2450,
+  "overall_flagged_pct": 28.82,
+  "per_mark_type": {
+    "blank": {
+      "count": 521,
+      "correct": 521,
+      "flagged": 0,
+      "wrong_and_unflagged": 0,
+      "correct_pct": 100.0,
+      "flagged_pct": 0.0,
+      "wrong_and_unflagged_pct": 0.0
+    },
+    "checkmark": {
+      "count": 215,
+      "correct": 0,
+      "flagged": 215,
+      "wrong_and_unflagged": 0,
+      "correct_pct": 0.0,
+      "flagged_pct": 100.0,
+      "wrong_and_unflagged_pct": 0.0
+    },
+    "double": {
+      "count": 333,
+      "correct": 333,
+      "flagged": 333,
+      "wrong_and_unflagged": 0,
+      "correct_pct": 100.0,
+      "flagged_pct": 100.0,
+      "wrong_and_unflagged_pct": 0.0
+    },
+    "half_fill": {
+      "count": 498,
+      "correct": 0,
+      "flagged": 498,
+      "wrong_and_unflagged": 0,
+      "correct_pct": 0.0,
+      "flagged_pct": 100.0,
+      "wrong_and_unflagged_pct": 0.0
+    },
+    "light_gray": {
+      "count": 463,
+      "correct": 12,
+      "flagged": 379,
+      "wrong_and_unflagged": 72,
+      "correct_pct": 2.59,
+      "flagged_pct": 81.86,
+      "wrong_and_unflagged_pct": 15.55
+    },
+    "mid_gray": {
+      "count": 421,
+      "correct": 282,
+      "flagged": 139,
+      "wrong_and_unflagged": 0,
+      "correct_pct": 66.98,
+      "flagged_pct": 33.02,
+      "wrong_and_unflagged_pct": 0.0
+    },
+    "scribble": {
+      "count": 184,
+      "correct": 0,
+      "flagged": 184,
+      "wrong_and_unflagged": 0,
+      "correct_pct": 0.0,
+      "flagged_pct": 100.0,
+      "wrong_and_unflagged_pct": 0.0
+    },
+    "small_dot": {
+      "count": 504,
+      "correct": 0,
+      "flagged": 504,
+      "wrong_and_unflagged": 0,
+      "correct_pct": 0.0,
+      "flagged_pct": 100.0,
+      "wrong_and_unflagged_pct": 0.0
+    },
+    "solid": {
+      "count": 5163,
+      "correct": 5163,
+      "flagged": 0,
+      "wrong_and_unflagged": 0,
+      "correct_pct": 100.0,
+      "flagged_pct": 0.0,
+      "wrong_and_unflagged_pct": 0.0
+    },
+    "x_mark": {
+      "count": 198,
+      "correct": 0,
+      "flagged": 198,
+      "wrong_and_unflagged": 0,
+      "correct_pct": 0.0,
+      "flagged_pct": 100.0,
+      "wrong_and_unflagged_pct": 0.0
+    }
+  }
+}

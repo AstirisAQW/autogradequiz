@@ -20,33 +20,35 @@ def draw_perfect_mark(canvas: np.ndarray, center_px: tuple[int, int], radius_px:
 
 def draw_incomplete_mark(
     canvas: np.ndarray, center_px: tuple[int, int], radius_px: int, rng: np.random.Generator
-) -> None:
+) -> str:
     """A filled circle at 60-80% of the bubble radius, or a filled partial arc."""
     if rng.random() < 0.5:
         shrunk_radius = int(round(radius_px * rng.uniform(0.6, 0.8)))
         cv2.circle(canvas, center_px, max(shrunk_radius, 1), BLACK, -1)
-    else:
-        start_angle = float(rng.uniform(0, 360))
-        arc_span = float(rng.uniform(120, 180))
-        cv2.ellipse(
-            canvas,
-            center_px,
-            (radius_px, radius_px),
-            0,
-            start_angle,
-            start_angle + arc_span,
-            BLACK,
-            -1,
-        )
+        return "small_dot"
+    start_angle = float(rng.uniform(0, 360))
+    arc_span = float(rng.uniform(120, 180))
+    cv2.ellipse(
+        canvas,
+        center_px,
+        (radius_px, radius_px),
+        0,
+        start_angle,
+        start_angle + arc_span,
+        BLACK,
+        -1,
+    )
+    return "half_fill"
 
 
 def draw_light_mark(
     canvas: np.ndarray, center_px: tuple[int, int], radius_px: int, rng: np.random.Generator
-) -> None:
+) -> str:
     """A fully-shaped fill, but in gray instead of black."""
     gray_value = int(rng.integers(130, 190))
     color = (gray_value, gray_value, gray_value)
     cv2.circle(canvas, center_px, radius_px, color, -1)
+    return "mid_gray" if gray_value < 160 else "light_gray"
 
 
 def draw_off_center_mark(
@@ -72,7 +74,7 @@ def _scribble_points(
 
 def draw_non_circular_mark(
     canvas: np.ndarray, center_px: tuple[int, int], radius_px: int, rng: np.random.Generator
-) -> None:
+) -> str:
     """An X, a checkmark, or a scribble instead of a filled circle.
 
     style is drawn uniformly from {0, 1, 2}: 0 draws an X, 1 draws a checkmark, 2 draws a
@@ -86,14 +88,16 @@ def draw_non_circular_mark(
     if style == 0:
         cv2.line(canvas, (cx - reach, cy - reach), (cx + reach, cy + reach), BLACK, thickness)
         cv2.line(canvas, (cx - reach, cy + reach), (cx + reach, cy - reach), BLACK, thickness)
-    elif style == 1:
+        return "x_mark"
+    if style == 1:
         p1 = (cx - reach, cy)
         p2 = (cx - reach // 3, cy + reach)
         p3 = (cx + reach, cy - reach)
         cv2.polylines(canvas, [np.array([p1, p2, p3], dtype=np.int32)], False, BLACK, thickness)
-    else:
-        points = _scribble_points(center_px, radius_px, rng)
-        cv2.polylines(canvas, [points], False, BLACK, thickness)
+        return "checkmark"
+    points = _scribble_points(center_px, radius_px, rng)
+    cv2.polylines(canvas, [points], False, BLACK, thickness)
+    return "scribble"
 
 
 def draw_marks_for_plan(
@@ -103,9 +107,9 @@ def draw_marks_for_plan(
     radius_px: int,
     page: PageSize,
     rng: np.random.Generator,
-) -> None:
+) -> str:
     if plan.mark_kind == QuestionMarkKind.BLANK:
-        return
+        return "blank"
 
     if plan.mark_kind == QuestionMarkKind.DOUBLE:
         for choice in plan.marked_choices:
@@ -113,7 +117,7 @@ def draw_marks_for_plan(
                 template_spec, plan.question_number, ANSWER_CHOICES.index(choice), page
             )
             draw_perfect_mark(canvas, center, radius_px)
-        return
+        return "double"
 
     choice = plan.marked_choices[0]
     center = bubble_position_px(
@@ -122,11 +126,14 @@ def draw_marks_for_plan(
 
     if plan.mark_kind == QuestionMarkKind.PERFECT:
         draw_perfect_mark(canvas, center, radius_px)
-    elif plan.mark_kind == QuestionMarkKind.INCOMPLETE:
-        draw_incomplete_mark(canvas, center, radius_px, rng)
-    elif plan.mark_kind == QuestionMarkKind.LIGHT:
-        draw_light_mark(canvas, center, radius_px, rng)
-    elif plan.mark_kind == QuestionMarkKind.OFF_CENTER:
+        return "solid"
+    if plan.mark_kind == QuestionMarkKind.INCOMPLETE:
+        return draw_incomplete_mark(canvas, center, radius_px, rng)
+    if plan.mark_kind == QuestionMarkKind.LIGHT:
+        return draw_light_mark(canvas, center, radius_px, rng)
+    if plan.mark_kind == QuestionMarkKind.OFF_CENTER:
         draw_off_center_mark(canvas, center, radius_px, rng)
-    elif plan.mark_kind == QuestionMarkKind.NON_CIRCULAR:
-        draw_non_circular_mark(canvas, center, radius_px, rng)
+        return "solid"
+    if plan.mark_kind == QuestionMarkKind.NON_CIRCULAR:
+        return draw_non_circular_mark(canvas, center, radius_px, rng)
+    return plan.mark_kind.value

@@ -139,5 +139,13 @@ def create_synthetic_scan(batch_id: int, payload: SyntheticScanRequest) -> dict[
         "scan_job_id": job.id,
         "seed": payload.seed,
         "marked_choices": ["".join(plan.marked_choices) for plan in sheet.question_plans],
+        "ground_truth": [
+            {
+                "question_number": plan.question_number,
+                "marked_choices": list(plan.marked_choices),
+                "mark_type": mark_type,
+            }
+            for plan, mark_type in zip(sheet.question_plans, sheet.mark_types)
+        ],
         "result": result,
     }

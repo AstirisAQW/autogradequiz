@@ -37,6 +37,7 @@ class SyntheticSheet:
     stray_mark_count: int
     image: np.ndarray
     scan_artifacts: ScanArtifacts | None = None
+    mark_types: tuple[str, ...] = ()
 
     @property
     def answer_key(self) -> list[str]:
@@ -66,8 +67,10 @@ def generate_synthetic_sheet(
     radius_px = bubble_radius_px(template_spec, page)
 
     question_plans = generate_question_plans(template_spec, rng, answer_key=answer_key)
-    for plan in question_plans:
+    mark_types = tuple(
         draw_marks_for_plan(canvas, template_spec, plan, radius_px, page, rng)
+        for plan in question_plans
+    )
 
     stray_mark_count = int(rng.integers(STRAY_MARK_MIN_COUNT, STRAY_MARK_MAX_COUNT))
     draw_stray_marks(canvas, page, stray_mark_count, rng)
@@ -81,4 +84,5 @@ def generate_synthetic_sheet(
         stray_mark_count=stray_mark_count,
         image=image,
         scan_artifacts=scan_artifacts,
+        mark_types=mark_types,
     )
