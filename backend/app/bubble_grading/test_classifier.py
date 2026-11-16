@@ -84,18 +84,16 @@ def test_incomplete_off_center_and_non_circular_marks_classify_as_filled_or_ambi
             assert result in (BubbleResult.FILLED, BubbleResult.AMBIGUOUS)
 
 
-def test_light_marks_can_read_as_blank_on_small_bubble_radii():
-    """A LIGHT mark's gray fill (130-190) sometimes never clears the classifier's
-    dark_offset against a small bubble radius like HUNDRED_QUESTIONS uses, and this
-    sheet's seed reliably produces some fill_ratio == 0.0 LIGHT marks -- so BLANK is a
-    real, allowed outcome here, not just FILLED or AMBIGUOUS. This documents that
-    behavior rather than asserting a stricter guarantee the classifier doesn't make."""
+def test_light_marks_never_read_as_blank_on_small_bubble_radii():
+    """With per-sheet normalized ink and row-relative classification, even LIGHT marks on
+    HUNDRED_QUESTIONS small bubbles must never silently read as BLANK."""
     question_plans, question_fills = _classified_ground_truth()
 
     for plan in question_plans:
         if plan.mark_kind == QuestionMarkKind.LIGHT:
-            result = question_fills[plan.question_number].result
-            assert result in (BubbleResult.FILLED, BubbleResult.AMBIGUOUS, BubbleResult.BLANK)
+            fill = question_fills[plan.question_number]
+            assert fill.result in (BubbleResult.FILLED, BubbleResult.AMBIGUOUS)
+            assert fill.marked_choices == plan.marked_choices
 
 
 def test_score_sheet_outcomes_cover_every_question_exactly_once():
@@ -143,24 +141,25 @@ def test_printed_outline_alone_never_counts_as_trace():
             assert fill.result == BubbleResult.BLANK
             assert fill.marked_choices == ()
             for _, bubble_fill in fill.bubble_fills:
-                assert bubble_fill.trace_ratio < DEFAULT_THRESHOLDS.trace_min_ratio
+                assert bubble_fill.trace_ratio < DEFAULT_THRESHOLDS.blank_peak_floor
 
 
-def test_ink_between_old_and_new_cutoffs_reads_ambiguous_and_clean_blank_reads_blank():
+def test_faint_gray_mark_is_detected_and_clean_blank_reads_blank():
     canvas = render_sheet(TWENTY_QUESTIONS, page=PAGE)
     radius_px = bubble_radius_px(TWENTY_QUESTIONS, PAGE)
     center_b = bubble_position_px(TWENTY_QUESTIONS, 1, 1, PAGE)
-    # Gray 180 is between 255 - dark_offset (165) and 255 - trace_dark_offset (205).
-    cv2.circle(canvas, center_b, radius_px, (180, 180, 180), -1)
+    # Gray 200 has normalized ink ~0.216: above blank_peak_floor, below filled_min_mean_ink.
+    cv2.circle(canvas, center_b, radius_px, (200, 200, 200), -1)
 
     fills = classify_sheet(canvas, TWENTY_QUESTIONS, PAGE)
 
     q1 = fills[1]
     assert q1.result == BubbleResult.AMBIGUOUS
     assert q1.marked_choices == ("B",)
+    assert q1.confidence > 0.0
     q1_b = dict(q1.bubble_fills)["B"]
-    assert q1_b.fill_ratio <= DEFAULT_THRESHOLDS.blank_max_ratio
-    assert q1_b.trace_ratio >= DEFAULT_THRESHOLDS.trace_min_ratio
+    assert q1_b.trace_ratio >= DEFAULT_THRESHOLDS.blank_peak_floor
+    assert q1_b.fill_ratio < DEFAULT_THRESHOLDS.filled_min_mean_ink
 
     q2 = fills[2]
     assert q2.result == BubbleResult.BLANK

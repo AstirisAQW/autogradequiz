@@ -232,9 +232,13 @@ def test_grade_scan_job_scores_against_the_tests_key_not_the_sheets_own(tmp_path
         )
         return grade_scan_job(scan_job.id)
 
+    import json
+
     matching_result = _grade_against(answer_key)
+    detected = json.loads(matching_result.answers_json)
     disagreeing_key = [
-        next(choice for choice in ANSWER_CHOICES if choice != correct) for correct in answer_key
+        next(choice for choice in ANSWER_CHOICES if choice not in (correct, det))
+        for correct, det in zip(answer_key, detected)
     ]
     disagreeing_result = _grade_against(disagreeing_key)
 
