@@ -37,7 +37,7 @@ pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
 
-API docs: <http://127.0.0.1:8000/docs> (`GET /health` for health check). Uploads and SQLite data live under `backend/data/`.
+API docs: <http://127.0.0.1:8000/docs> (`GET /health` for health check). Built-in backend sandbox: <http://127.0.0.1:8000/test-ui> (`/` redirects there). Uploads and SQLite data live under `backend/data/`.
 
 ### Generate templates & synthetic sheets
 
@@ -72,11 +72,11 @@ Print templates land in `backend/data/templates/` (print at 100% scale; never us
 | `PATCH` | `/scans/{scan_job_id}/identity` | Update Name, Date, or Section |
 
 ### How the backend was tested
-Run from `backend/` with `.venv` activated (and `PYTHONPATH=.` for `scripts/read_check.py`):
+Run from `backend/` with `.venv` activated (and `PYTHONPATH=.` for `scripts/` and `tools/`):
 
-- `pytest`: **121 passed** (in 133.18s)
+- `pytest`: **124 passed** (in 197.29s)
 - `ruff check .`: **All checks passed**
-- `python scripts/read_check.py --seeds 50`: **150 synthetic sheets** (50 per template: `20q_a4`, `50q_a4`, `100q_a4`), **8,500 questions**, **0 failed sheets**, **0 mismatches** (max observed rotation angle 4.991 deg).
+- `python tools/eval_accuracy.py --seeds 50`: **150 synthetic sheets** (50 per template: `20q_a4`, `50q_a4`, `100q_a4`), **8,500 questions**, **0 alignment failures**, **0.00% wrong-and-unflagged** across all mark types (`100.00%` candidate accuracy, `21.86%` overall flagged).
 
 Synthetic testing verifies the pipeline against simulated marks and scan artifacts, but it does not prove accuracy on real printed/photographed paper, varied lighting, camera lens distortion, or handwritten names and dates.
 
@@ -148,8 +148,10 @@ backend/
     db/                       SQLite schema and repositories
     synthetic_sheets/         synthetic filled-in sheets for tests
     main.py, routers.py       FastAPI app and routes
+    test_ui.html              built-in backend testing sandbox (/test-ui)
   data/templates/             printable sheets and template JSON
   scripts/                    template, synthetic sheet, and read-check scripts
+  tools/                      accuracy harness (eval_accuracy.py, eval_baseline.json)
 frontend/
   src/                        Next.js web client
 docs/
