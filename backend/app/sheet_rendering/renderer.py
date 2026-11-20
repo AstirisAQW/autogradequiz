@@ -10,8 +10,11 @@ from app.answer_sheet_templates.geometry import (
     ANSWER_CHOICES,
     BUBBLE_OUTLINE_THICKNESS_PX,
     FIDUCIAL_SIZE_MM,
+    KEY_VERSION_BUBBLE_RADIUS_MM,
+    KEY_VERSION_CHOICES,
     ROW_GROUP_SIZE,
     PageSize,
+    key_version_bubble_position_mm,
     mm_length_to_px,
     mm_to_px,
     row_position_mm,
@@ -68,6 +71,31 @@ def draw_text_field(canvas: np.ndarray, field: TextFieldSpecMm, page: PageSize) 
 
     cv2.putText(canvas, field.label, label_position, cv2.FONT_HERSHEY_SIMPLEX, font_scale, BLACK, 2)
     cv2.rectangle(canvas, top_left, bottom_right, BLACK, 2)
+
+
+def draw_text_field_values(
+    canvas: np.ndarray,
+    values: dict[str, str],
+    text_field_specs: tuple[TextFieldSpecMm, ...] = DEFAULT_TEXT_FIELDS,
+    page: PageSize = PAGE,
+) -> None:
+    """Draw sample text inside the header text fields (e.g. for synthetic sheets)."""
+    font_scale = font_pt_to_scale(12.0, page)
+    for field in text_field_specs:
+        text = (values.get(field.id) or "").strip()
+        if not text:
+            continue
+        x0, _ = mm_to_px(field.x_mm + 2.5, field.y_mm, page)
+        _, y1 = mm_to_px(field.x_mm, field.y_mm + field.height_mm - 2.5, page)
+        cv2.putText(
+            canvas,
+            text,
+            (x0, y1),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            BLACK,
+            2,
+        )
 
 
 def draw_bubble(
@@ -189,6 +217,25 @@ def draw_title(canvas: np.ndarray, question_count: int, page: PageSize) -> None:
     cv2.putText(canvas, title, title_position, cv2.FONT_HERSHEY_SIMPLEX, font_scale, BLACK, 2)
 
 
+def draw_key_version_strip(canvas: np.ndarray, page: PageSize) -> None:
+    label_pos = mm_to_px(20.0, 48.0, page)
+    cv2.putText(
+        canvas,
+        "Key Version:",
+        label_pos,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        font_pt_to_scale(10.0, page),
+        BLACK,
+        2,
+    )
+    letter_scale = font_pt_to_scale(10.5, page)
+    for idx, choice in enumerate(KEY_VERSION_CHOICES):
+        bx_mm, by_mm = key_version_bubble_position_mm(idx)
+        letter_pos = mm_to_px(bx_mm - 7.0, 48.0, page)
+        cv2.putText(canvas, choice, letter_pos, cv2.FONT_HERSHEY_SIMPLEX, letter_scale, BLACK, 2)
+        draw_bubble(canvas, bx_mm, by_mm, KEY_VERSION_BUBBLE_RADIUS_MM, page)
+
+
 def render_sheet(
     template_spec: TemplateSpec,
     text_field_specs: tuple[TextFieldSpecMm, ...] = DEFAULT_TEXT_FIELDS,
@@ -201,6 +248,7 @@ def render_sheet(
     for field in text_field_specs:
         draw_text_field(canvas, field, page)
 
+    draw_key_version_strip(canvas, page)
     draw_title(canvas, template_spec.question_count, page)
 
     for column in template_spec.columns:

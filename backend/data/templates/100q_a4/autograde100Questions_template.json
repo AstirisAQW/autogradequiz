@@ -72,6 +72,13 @@
       "y": 0.107744,
       "width": 0.285714,
       "height": 0.03367
+    },
+    {
+      "id": "student_id",
+      "x": 0.47619,
+      "y": 0.107744,
+      "width": 0.404762,
+      "height": 0.03367
     }
   ],
   "answer_grid": {
@@ -118,5 +125,17 @@
     "row_spacing": 0.021886,
     "choice_spacing": 0.02619,
     "bubble_radius": 0.007619
+  },
+  "key_version_strip": {
+    "choices": [
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "origin_x": 0.266667,
+    "origin_y": 0.158249,
+    "choice_spacing": 0.085714,
+    "bubble_radius": 0.011429
   }
 }

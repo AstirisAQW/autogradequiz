@@ -38,7 +38,7 @@ def template_to_json_dict(template: Template) -> dict:
     mid_markers = [
         point_to_dict(f"mid_{index}", point) for index, point in enumerate(template.mid_markers)
     ]
-    return {
+    payload = {
         "template_id": template.template_id,
         "page": {
             "width_mm": template.page.width_mm,
@@ -56,3 +56,13 @@ def template_to_json_dict(template: Template) -> dict:
             "bubble_radius": round_fraction(template.answer_grid.bubble_radius),
         },
     }
+    if template.key_version_strip is not None:
+        strip = template.key_version_strip
+        payload["key_version_strip"] = {
+            "choices": strip.choices,
+            "origin_x": round_fraction(strip.origin_x),
+            "origin_y": round_fraction(strip.origin_y),
+            "choice_spacing": round_fraction(strip.choice_spacing),
+            "bubble_radius": round_fraction(strip.bubble_radius),
+        }
+    return payload

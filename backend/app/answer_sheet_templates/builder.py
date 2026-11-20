@@ -3,8 +3,14 @@
 from app.answer_sheet_templates.geometry import (
     ANSWER_CHOICES,
     FIDUCIAL_SIZE_MM,
+    KEY_VERSION_BUBBLE_RADIUS_MM,
+    KEY_VERSION_CHOICES,
+    KEY_VERSION_ORIGIN_X_MM,
+    KEY_VERSION_ORIGIN_Y_MM,
+    KEY_VERSION_SPACING_MM,
     AnswerColumn,
     AnswerGrid,
+    KeyVersionStrip,
     PageSize,
     Point,
     Template,
@@ -15,14 +21,14 @@ from app.answer_sheet_templates.layout_spec import ColumnSpecMm, TemplateSpec, T
 PAGE = PageSize(width_mm=210.0, height_mm=297.0, dpi=300)
 
 FIDUCIAL_MARGIN_MM = 6.0
-BUBBLE_RADIUS_MM = 2.5
-ROW_SPACING_MM = 7.0
-CHOICE_SPACING_MM = 7.0
 
 DEFAULT_TEXT_FIELDS: tuple[TextFieldSpecMm, ...] = (
     TextFieldSpecMm(id="name", label="Name", x_mm=20, y_mm=18, width_mm=90, height_mm=10),
     TextFieldSpecMm(id="date", label="Date", x_mm=130, y_mm=18, width_mm=55, height_mm=10),
     TextFieldSpecMm(id="section", label="Section", x_mm=20, y_mm=32, width_mm=60, height_mm=10),
+    TextFieldSpecMm(
+        id="student_id", label="Student ID", x_mm=100, y_mm=32, width_mm=85, height_mm=10
+    ),
 )
 
 
@@ -88,6 +94,16 @@ def build_answer_grid(template_spec: TemplateSpec, page: PageSize) -> AnswerGrid
     )
 
 
+def build_key_version_strip(page: PageSize) -> KeyVersionStrip:
+    return KeyVersionStrip(
+        choices=list(KEY_VERSION_CHOICES),
+        origin_x=KEY_VERSION_ORIGIN_X_MM / page.width_mm,
+        origin_y=KEY_VERSION_ORIGIN_Y_MM / page.height_mm,
+        choice_spacing=KEY_VERSION_SPACING_MM / page.width_mm,
+        bubble_radius=KEY_VERSION_BUBBLE_RADIUS_MM / page.width_mm,
+    )
+
+
 def build_template(
     template_spec: TemplateSpec,
     text_field_specs: tuple[TextFieldSpecMm, ...] = DEFAULT_TEXT_FIELDS,
@@ -100,4 +116,5 @@ def build_template(
         mid_markers=build_mid_markers(template_spec.mid_marker_positions_mm, page),
         text_fields=build_text_fields(text_field_specs, page),
         answer_grid=build_answer_grid(template_spec, page),
+        key_version_strip=build_key_version_strip(page),
     )

@@ -15,6 +15,12 @@ BUBBLE_OUTLINE_THICKNESS_PX = 2
 ROW_GROUP_SIZE = 10
 ROW_GROUP_GAP_MM = 5.0
 
+KEY_VERSION_CHOICES = ("A", "B", "C", "D")
+KEY_VERSION_ORIGIN_X_MM = 56.0
+KEY_VERSION_ORIGIN_Y_MM = 47.0
+KEY_VERSION_SPACING_MM = 18.0
+KEY_VERSION_BUBBLE_RADIUS_MM = 2.4
+
 
 @dataclass(frozen=True)
 class PageSize:
@@ -57,6 +63,15 @@ class AnswerGrid:
 
 
 @dataclass(frozen=True)
+class KeyVersionStrip:
+    choices: list[str]
+    origin_x: float
+    origin_y: float
+    choice_spacing: float
+    bubble_radius: float
+
+
+@dataclass(frozen=True)
 class Template:
     template_id: str
     page: PageSize
@@ -64,6 +79,7 @@ class Template:
     mid_markers: list[Point]
     text_fields: list[TextFieldSpec]
     answer_grid: AnswerGrid
+    key_version_strip: KeyVersionStrip | None = None
 
 
 def mm_to_px(x_mm: float, y_mm: float, page: PageSize) -> tuple[int, int]:
@@ -118,4 +134,22 @@ def bubble_position_px(
 
 def bubble_radius_px(template_spec: TemplateSpec, page: PageSize) -> int:
     return mm_length_to_px(template_spec.bubble_radius_mm, page)
+
+
+def key_version_bubble_position_mm(version_index: int) -> tuple[float, float]:
+    return (
+        KEY_VERSION_ORIGIN_X_MM + version_index * KEY_VERSION_SPACING_MM,
+        KEY_VERSION_ORIGIN_Y_MM,
+    )
+
+
+def key_version_bubble_position_px(
+    version_index: int, page: PageSize
+) -> tuple[int, int]:
+    x_mm, y_mm = key_version_bubble_position_mm(version_index)
+    return mm_to_px(x_mm, y_mm, page)
+
+
+def key_version_bubble_radius_px(page: PageSize) -> int:
+    return mm_length_to_px(KEY_VERSION_BUBBLE_RADIUS_MM, page)
 

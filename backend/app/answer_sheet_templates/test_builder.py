@@ -75,7 +75,7 @@ def test_build_template_includes_default_text_fields():
 
     field_ids = {field.id for field in template.text_fields}
 
-    assert field_ids == {"name", "date", "section"}
+    assert field_ids == {"name", "date", "section", "student_id"}
 
 
 def test_template_to_json_dict_round_trips_question_count():
@@ -86,4 +86,4 @@ def test_template_to_json_dict_round_trips_question_count():
     assert json_dict["answer_grid"]["question_count"] == 50
     assert len(json_dict["fiducials"]["corners"]) == 4
     assert len(json_dict["fiducials"]["mid_markers"]) == 2
-    assert len(json_dict["text_fields"]) == 3
+    assert len(json_dict["text_fields"]) == 4
