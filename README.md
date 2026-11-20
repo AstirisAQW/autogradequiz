@@ -1,23 +1,69 @@
 # AutoGradeQuiz
 
-AutoGradeQuiz grades multiple-choice answer sheets from scanned or photographed pages. A teacher prints a sheet, students fill in the bubbles, and the app aligns the page, reads the marks, scores them against an answer key, lets the teacher fix doubtful answers, and exports the batch as CSV.
+AutoGradeQuiz grades multiple-choice answer sheets from scanned or photographed A4 pages. The Next.js frontend stores quizzes, classes, student rosters, and graded papers in browser IndexedDB with automatic disk sync to the backend workspace (`workspace/workspace.json` plus raw/aligned/graded scan images) and portable `.json`/`.csv` exports. The FastAPI backend is a stateless computer-vision, bubble-classification, and OCR grading service.
 
-> **Status:** Backend and web client v1 are done. Tested on synthetic sheets only; not yet calibrated on real scans.
+> **Status:** Verified on synthetic sheets (`102` backend tests, `40` frontend unit tests, `150`-sheet evaluation harness with `0.00%` unflagged errors). Not yet calibrated on real photographed paper under uneven lighting.
 
-- [Part 1: Backend (FastAPI + OpenCV + Tesseract)](#part-1-backend)
-- [Part 2: Frontend (Next.js Web Client)](#part-2-frontend)
-- [Project layout](#project-layout)
+- [Tech Stack & Dependencies](#tech-stack--dependencies)
+- [How the Bubble Scanning Pipeline Works](#how-the-bubble-scanning-pipeline-works)
+- [Part 1: Backend](#part-1-backend)
+- [Part 2: Frontend](#part-2-frontend)
+- [Project Layout](#project-layout)
 
 ```mermaid
 flowchart LR
-    T["Template (20/50/100 Q)"] --> P["Print at 100%"]
-    P --> U["Upload PNG/JPEG"]
-    U --> A["Align 4 corners"]
-    A --> R["Read bubbles + OCR"]
-    R --> S["Score against key"]
-    S --> V["Review flagged items"]
-    V --> E["Export CSV"]
+    T["Template (20/50/100 Q + Key A-D)"] --> P["Print at 100%"]
+    P --> U["Drop PNG/JPEG in Browser"]
+    U --> G["POST /grade (Align + Key Version + Classify + OCR)"]
+    G --> W["Save to IndexedDB + Disk Workspace + Auto-Link Student ID"]
+    W --> V["Review Flagged Questions (Inline Row Crops)"]
+    V --> E["Export CSV or Workspace JSON"]
 ```
+
+---
+
+## Tech Stack & Dependencies
+
+### Backend (`backend/pyproject.toml`, Python 3.13+)
+
+| Library | Version | Role |
+| --- | --- | --- |
+| `fastapi` + `uvicorn[standard]` | `>=0.115.0` / `>=0.32.0` | HTTP API (`/health`, `/templates`, `/grade`, `/tests/scan-key`, `/workspace/*`, `/test-ui`) |
+| `opencv-python-headless` | `>=4.10.0` | Otsu thresholding, contour fiducial detection, 4-point perspective warp, graded overlay rendering, and connected-component bubble analysis |
+| `numpy` | `>=2.1.0` | Vectorized circular disc masks, per-sheet white/black ink calibration, and percentile measurements |
+| `pytesseract` | `>=0.3.13` | Tesseract OCR wrapper (`--psm 7`) for reading `Name`, `Date`, `Section`, and `Student ID` header boxes |
+| `pillow` | `>=11.0.0` | Printable 300 DPI PDF template generation (`Key Version: A B C D` bubble strip included) |
+| `pydantic` + `pydantic-settings` | `>=2.9.0` / `>=2.6.0` | Request/response validation and environment configuration (`TESSERACT_CMD`, `AUTOGRADE_DATA_DIR`, `AUTOGRADE_WORKSPACE_DIR`) |
+| `pytest` + `ruff` *(dev)* | `>=8.0` / `>=0.8.0` | Unit/integration test runner and linter |
+
+### Frontend (`frontend/package.json`, Node.js 22.6+)
+
+| Library | Version | Role |
+| --- | --- | --- |
+| `next` + `react` + `react-dom` | `16.3.0` / `19.2.8` | App Router UI (`/`, `/classes`, `/classes/[id]`, `/students`, `/students/[id]`, `/quizzes/[id]`, `/review`, `/sections` alias) |
+| `idb` | `^8.0.4` | Typed IndexedDB wrapper for local-first storage (`quizzes`, `batches`, `papers`, `paperImages`, `sections`, `students`) |
+| `tailwindcss` | `^4` | Styling and design tokens |
+| `fake-indexeddb` *(dev)* | `^6.2.8` | In-memory IndexedDB for Node.js unit tests (`node --test`) |
+
+---
+
+## How the Bubble Scanning Pipeline Works
+
+Every `POST /grade` request runs a 4-stage pipeline in `backend/app/`:
+
+1. **Fiducial Detection & Perspective Alignment (`scan_alignment/align_scan.py`)**
+   - Each A4 sheet (`210 × 297 mm` at `300 DPI` = `2480 × 3507 px`) has four `8 × 8 mm` solid black corner fiducials plus asymmetric mid-edge markers.
+   - The aligner tests all 4 cardinal orientations (`0°`, `90°`, `180°`, `270°`), locates the corner squares inside corner search windows via Otsu thresholding and min-area rectangle filtering (falling back to a mid-edge marker if one corner is clipped), warps the sheet back to canonical A4 coordinates with `cv2.getPerspectiveTransform`, and picks the orientation where the expected mid-marker positions are darkest.
+2. **Per-Sheet Ink Calibration (`bubble_grading/classifier.py`)**
+   - Each aligned sheet calibrates its own `white` level (median pixel intensity of the blank lower paper band) and `black` level (median intensity of the inner 50% of the four corner fiducials).
+   - Every pixel is converted into a normalized ink fraction in `[0.0, 1.0]`: `clip((white - px) / (white - black), 0, 1)`.
+3. **Key Version Strip, Inner-Disc Classification & Partial-Credit Scoring (`bubble_grading/`)**
+   - Reads the printed `Key Version: A B C D` strip below the header (`classify_key_version`), selects the matching key version when configured, and flags ambiguous/multiple/unconfigured marks for teacher review.
+   - Each bubble is sampled inside its inner circular disc (`radius - outline_thickness - 1`) using **mean ink** (`fill_ratio`), **90th-percentile peak ink** (`trace_ratio`), and **largest connected dark component area** (`blob_ratio`).
+   - Classifies each row into `BLANK`, `FILLED`, `MULTIPLE`, or `AMBIGUOUS`, and scores primary/multi-mark keys, per-question point weights, alternate partial-credit answers, and attempted-but-incorrect rules (`scoring.py`).
+4. **Header Ink Check & Tesseract OCR (`grading_pipeline/grade_scan_job.py`)**
+   - Crops the `Name`, `Date`, `Section`, and `Student ID` boxes (`builder.py`).
+   - Checks interior dark-pixel share so blank boxes skip Tesseract; non-empty boxes run `pytesseract.image_to_string(..., config="--psm 7")`.
 
 ---
 
@@ -25,77 +71,69 @@ flowchart LR
 
 ### Requirements
 - Python 3.13+
-- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) (needed only to read Name, Date, and Section). Set `TESSERACT_CMD` to `tesseract.exe` if it is not on `PATH`.
+- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) to read `Name`, `Date`, `Section`, and `Student ID` boxes. Set `TESSERACT_CMD` to the `tesseract.exe` path if it is not on `PATH`.
 
-### Setup & run (Windows)
+### Setup and run (Windows)
 
 ```powershell
 cd backend
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e ".[dev]"
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-API docs: <http://127.0.0.1:8000/docs> (`GET /health` for health check). Built-in backend sandbox: <http://127.0.0.1:8000/test-ui> (`/` redirects there). Uploads and SQLite data live under `backend/data/`.
+- OpenAPI docs: <http://127.0.0.1:8000/docs>
+- Developer sandbox (with synthetic sheet generator & PNG download): <http://127.0.0.1:8000/test-ui>
 
-### Generate templates & synthetic sheets
+### Generate printable templates and synthetic sheets
 
 ```powershell
 cd backend
 .venv\Scripts\activate
+$env:PYTHONPATH = "."
 python scripts/generate_templates.py
 python scripts/generate_synthetic_sheets.py --templates 20q_a4 --count 5
 ```
 
-Print templates land in `backend/data/templates/` (print at 100% scale; never use "fit to page"). Synthetic sheets land in `backend/data/synthetic_sheets/20q_a4/`. Set `PYTHONPATH=.` if `backend` is not editable-installed.
+Printable templates are written to `backend/data/templates/` and copied on demand into `workspace/templates/`. Print them at 100% scale ("Actual size"). Synthetic test sheets are written to `backend/data/synthetic_sheets/20q_a4/`.
 
-### Settings & API overview
+### Settings and API routes
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `AUTOGRADE_DATA_DIR` | `backend/data` | Uploaded and aligned scan images |
-| `AUTOGRADE_DB_PATH` | `backend/data/autograde.db` | SQLite database file |
-| `TESSERACT_CMD` | empty (uses `PATH`) | Full path to `tesseract.exe` |
+| `TESSERACT_CMD` | empty (uses `PATH`) | Full path to the `tesseract` binary |
+| `AUTOGRADE_DATA_DIR` | `backend/data` | Directory for bundled template assets and CLI outputs |
+| `AUTOGRADE_WORKSPACE_DIR` | `workspace` | Local disk workspace directory for `workspace.json`, `scans/`, and `templates/` |
 
-| Method | Path | What it does |
+| Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/tests` | Create a test (`name`, `template_id`, `answer_key`) |
-| `POST` | `/tests/{test_id}/batches` | Create a batch under a test |
-| `POST` | `/batches/{batch_id}/scans` | Upload a PNG or JPEG scan (up to 10 MB) |
-| `POST` | `/scans/{scan_job_id}/grade` | Grade a scan (`?force=true` to regrade) |
-| `GET` | `/scans/{scan_job_id}/image` | Serve the scan image for review |
-| `GET` | `/batches/{batch_id}/results` | List batch results and job statuses |
-| `GET` | `/batches/{batch_id}/export.csv` | Download batch results as CSV |
-| `GET` | `/review-queue` | List scans needing review |
-| `PATCH` | `/scans/{scan_job_id}/corrections` | Save answer corrections (`{"corrections": {"1": "B"}}`) |
-| `PATCH` | `/scans/{scan_job_id}/identity` | Update Name, Date, or Section |
+| `GET` | `/health` | Return `{"status": "ok"}` |
+| `GET` | `/templates` | List template IDs (`20q_a4`, `50q_a4`, `100q_a4`) and question counts |
+| `POST` | `/grade` | Align, detect key version, classify, score (multi-key + partial rules), and OCR one sheet image |
+| `POST` | `/tests/scan-key` | Read a filled master sheet image and return its answer key |
+| `GET` | `/workspace/status` | Return disk workspace health, `workspace.json` presence, and scan artifact count |
+| `GET` / `PUT` | `/workspace/data` | Read or atomically save `workspace.json` and prune orphaned scan artifacts |
+| `GET` | `/workspace/templates/{template_id}` | Download printable A4 template PDF |
 
-### How the backend was tested
-Run from `backend/` with `.venv` activated (and `PYTHONPATH=.` for `scripts/` and `tools/`):
+### Verification (`backend/`)
 
-- `pytest`: **124 passed** (in 197.29s)
-- `ruff check .`: **All checks passed**
-- `python tools/eval_accuracy.py --seeds 50`: **150 synthetic sheets** (50 per template: `20q_a4`, `50q_a4`, `100q_a4`), **8,500 questions**, **0 alignment failures**, **0.00% wrong-and-unflagged** across all mark types (`100.00%` candidate accuracy, `21.86%` overall flagged).
-
-Synthetic testing verifies the pipeline against simulated marks and scan artifacts, but it does not prove accuracy on real printed/photographed paper, varied lighting, camera lens distortion, or handwritten names and dates.
-
-### Backend known limits
-- **Handwriting OCR:** Tesseract OCR is weak on handwriting; use the review screen or `PATCH /scans/{id}/identity` to fix Name, Date, or Section.
-- **Thresholds & capture conditions:** Bubble fill thresholds are calibrated on synthetic marks only; scans with extreme perspective or very uneven lighting can be rejected (`422`).
-- **Synchronous grading:** Grading runs inside the HTTP request with no background worker or queue.
-- **Upload checks:** Uploads are validated by content type (`image/png`, `image/jpeg`) and size (10 MB max) only.
-- **Deployment:** No Docker setup yet.
+```powershell
+cd backend
+.\.venv\Scripts\ruff.exe check .
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe tools/eval_accuracy.py --seeds 50
+```
 
 ---
 
 ## Part 2: Frontend
 
 ### Requirements
-- Node.js 20+ and npm
-- Running backend API at `http://127.0.0.1:8000` (see Part 1)
+- Node.js 22.6+ and npm
+- Running backend grader at `http://127.0.0.1:8000` (or set `NEXT_PUBLIC_API_URL`)
 
-### Setup & run (Windows)
+### Setup and run (Windows)
 
 ```powershell
 cd frontend
@@ -109,51 +147,49 @@ Open <http://localhost:3000>.
 
 | Script | Command | Purpose |
 | --- | --- | --- |
-| `dev` | `next dev` | Start local Next.js dev server |
-| `build` | `next build` | Production build and TypeScript check |
-| `start` | `next start` | Serve production build |
+| `dev` | `next dev` | Start the local Next.js development server |
+| `build` | `next build` | Build for production and run TypeScript checks |
+| `start` | `next start` | Serve the production build |
 | `lint` | `eslint` | Run ESLint |
-| `tauri` | `tauri` | Tauri CLI (desktop packaging deferred) |
+| `test` | `node --test src/lib/*.test.ts` | Run unit tests for answer keys, scoring, geometry, analytics, and IndexedDB workspace |
 
 ### Screens
-
-- **Home (test, batch & upload):** Create a test (`20q_a4`, `50q_a4`, `100q_a4`) and answer key, create a batch, then select multiple PNG/JPEG scans (for example from `backend/data/synthetic_sheets/20q_a4/`) and click **Upload and grade**.
-
-  ![Home screen](docs/screenshots/home.png)
-
-- **Results:** View every scan in the active batch with score, status, and review badge, regrade individual rows, and export the batch to CSV.
-
-  ![Results table](docs/screenshots/results.png)
-
-- **Review:** Work through scans flagged `needs_review` side by side with the aligned sheet image, fix flagged answers or identity fields, and save corrections.
-
-  ![Review screen](docs/screenshots/review.png)
-
-### Frontend known limits
-- **Flagged-only corrections:** Only questions flagged `ambiguous`, `multiple`, or all-blank can be corrected in review.
-- **Browser only:** The web client runs in a browser only (Tauri desktop packaging is deferred).
+- **Quizzes (`/`)**: Folder/class/tag filters, sort and search, workspace stats, 2-step **New Quiz** wizard (Name, Template, Date, Folder, Classes, Tags → full-width Answer Key editor), **Save workspace (`.json`)**, and **Open workspace (`.json`)**.
+- **Quiz menu (`/quizzes/[id]`)**:
+  - **Papers tab**: Drag-and-drop PNG/JPEG sheets to grade via `POST /grade`, auto-link papers by scanned `Student ID`, toggle graded overlays, or export UTF-8 BOM CSVs.
+  - **Statistics tab**: Score summary (`Min`, `Max`, `Average`, `Median`, `Std Dev`), score distribution histogram, and Key Version breakdown.
+  - **Item analysis tab**: Per-question difficulty, choice distribution, and discrimination index with optional Key Version filtering.
+  - **Tag report tab**: Per-question/quiz tag earned points and proficiency summary.
+  - **Answer key tab**: Multi-version key tabs (`A: Primary`, `B`–`D`), inline partial-credit & tag **Answer Detail** rules, bulk point editor, and **Scan key from sheet**.
+  - **Batches tab**: Organize paper stacks by class.
+- **Classes (`/classes`, `/classes/[id]`)**: Manage classes, enroll/remove students (with student picker), and review quizzes assigned to each class.
+- **Students (`/students`, `/students/[id]`)**: Sortable, filterable student directory with auto-generated 5-digit codes, per-student quiz history with score progression, and retroactive auto-linking of papers matching `Student ID`.
+- **Review Papers (`/review`)**: Student identity & Key Version (`A–D`) override bar, full aligned/graded scan preview with millimeter locator box, and zoomed row crops for flagged questions (`A`–`E`, `Backspace`, `↑`/`↓`, `←`/`→`, `Enter`).
 
 ---
 
-## Project layout
+## Project Layout
 
 ```text
 backend/
   app/
-    answer_sheet_templates/   template definitions and geometry
-    sheet_rendering/          draws printable sheets
-    scan_alignment/           finds corner markers and warps scans
-    bubble_grading/           bubble classifier and scoring
-    grading_pipeline/         grades one scan job end to end
-    db/                       SQLite schema and repositories
-    synthetic_sheets/         synthetic filled-in sheets for tests
-    main.py, routers.py       FastAPI app and routes
-    test_ui.html              built-in backend testing sandbox (/test-ui)
-  data/templates/             printable sheets and template JSON
-  scripts/                    template, synthetic sheet, and read-check scripts
-  tools/                      accuracy harness (eval_accuracy.py, eval_baseline.json)
+    answer_sheet_templates/   A4 template specs (20q, 50q, 100q), header boxes, Key Version A-D geometry
+    sheet_rendering/          printable PDF/PNG sheet renderer and synthetic text drawer
+    scan_alignment/           corner/mid fiducial detection and perspective warp
+    bubble_grading/           normalized-ink classifier, overlay renderer, and partial-credit scorer
+    grading_pipeline/         stateless multi-key grade pipeline and Tesseract OCR
+    synthetic_sheets/         reproducible synthetic sheet generator for tests
+    main.py, routers.py       FastAPI app and stateless grading endpoints
+    workspace_router.py       /workspace/* JSON persistence and template download routes
+    workspace_storage.py      atomic workspace.json I/O, scan artifacts, and orphan pruning
+    test_ui.html              developer testing sandbox (/test-ui)
+  scripts/                    printable template and synthetic sheet CLI scripts
+  tools/                      accuracy evaluation harness (eval_accuracy.py)
 frontend/
-  src/                        Next.js web client
-docs/
-  screenshots/                placeholder folder for UI screenshots
+  src/
+    app/                      Next.js routes (/, /classes, /classes/[id], /students, /students/[id], /quizzes/[id], /review)
+    components/               AppShell, AnswerKeyGrid, quiz/, roster/, review/, and ui/ primitives
+    lib/                      answerKey, scoring, sheetGeometry, itemAnalysis, statistics, tagReport, api
+    lib/workspace/            IndexedDB store modules (quizzes, papers, roster, reports, keyVersion, backup, diskSync, serialize)
+workspace/                    local workspace folder (workspace.json, scans/, templates/)
 ```
