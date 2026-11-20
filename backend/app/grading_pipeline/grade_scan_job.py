@@ -1,68 +1,122 @@
-"""Grades one pending scan job end to end: load its image, align it to the template's
-page dimensions using its fiducial markers, classify it against its test's template,
-score it against the answer key, read name/date/section with Tesseract OCR (falling back
-to blank strings on OCR failure while preserving any hand-edited identity values), and
-persist the result.
+"""Stateless grading pipeline: align a scanned answer sheet using its fiducial
+markers, classify bubbles against the template spec, score against the answer
+key, and read name/date/section text boxes with Tesseract OCR.
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
+import math
+from dataclasses import dataclass
+from typing import Any
 
-import cv2
 import numpy as np
 import pytesseract
 
 from app.answer_sheet_templates.builder import DEFAULT_TEXT_FIELDS, PAGE
-from app.answer_sheet_templates.catalog import get_template_spec
-from app.answer_sheet_templates.geometry import PageSize, mm_to_px
-from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_sheet, to_grayscale
-from app.bubble_grading.scoring import score_sheet
-from app.config import get_settings
-from app.db.exceptions import ScanResultNotFoundError
-from app.db.records import NewScanResult, ScanResultRecord
-from app.db.repositories import (
-    get_batch,
-    get_scan_job,
-    get_scan_result,
-    get_test,
-    record_scan_error,
-    save_scan_result,
-    update_scan_job_status,
+from app.answer_sheet_templates.geometry import (
+    ANSWER_CHOICES,
+    KEY_VERSION_CHOICES,
+    PageSize,
+    mm_to_px,
 )
-from app.grading_pipeline.corrections import apply_scan_corrections
-from app.grading_pipeline.exceptions import ScanImageUnreadableError, ScanJobAlreadyGradedError
+from app.answer_sheet_templates.layout_spec import TemplateSpec
+from app.bubble_grading.classifier import (
+    BubbleResult,
+    QuestionFill,
+    calibrate_sheet_ink,
+    classify_key_version,
+    classify_sheet,
+    to_grayscale,
+)
+from app.bubble_grading.scoring import QuestionRule, ScoreSummary, score_sheet
+from app.config import get_settings
+from app.grading_pipeline.exceptions import InvalidAnswerKeyError
 from app.scan_alignment.align_scan import align_scan
 
 
-def load_scan_image(raw_image_path: str) -> np.ndarray:
-    image = cv2.imread(raw_image_path)
-    if image is None:
-        raise ScanImageUnreadableError(raw_image_path)
-    return image
+@dataclass(frozen=True)
+class ResolvedKeySpec:
+    version: str
+    answer_key: list[str]
+    points: list[float]
+    question_rules: list[QuestionRule]
 
 
-def question_fills_to_answers_json(question_fills: dict[int, QuestionFill]) -> str:
-    """One entry per question, in question-number order: its marked choice(s) joined
-    with "+", or "" if the question was left blank."""
-    ordered_numbers = sorted(question_fills)
-    answers = ["+".join(question_fills[number].marked_choices) for number in ordered_numbers]
-    return json.dumps(answers)
+def normalize_answer_key_entry(entry: str) -> str:
+    parts = [p.strip().upper() for p in entry.split("+") if p.strip()]
+    if not parts or any(part not in ANSWER_CHOICES for part in parts):
+        raise InvalidAnswerKeyError(f"Answer choices must be in {ANSWER_CHOICES}.")
+    unique_sorted = sorted(set(parts), key=ANSWER_CHOICES.index)
+    return "+".join(unique_sorted)
 
 
-def question_fills_to_flags_json(question_fills: dict[int, QuestionFill]) -> str:
-    """Question numbers that need a human's attention, grouped by why."""
-    ordered_items = sorted(question_fills.items())
-    flags = {
-        "ambiguous": [
-            number for number, fill in ordered_items if fill.result == BubbleResult.AMBIGUOUS
-        ],
-        "multiple": [
-            number for number, fill in ordered_items if fill.result == BubbleResult.MULTIPLE
-        ],
-    }
-    return json.dumps(flags)
+def validate_answer_key_and_points(
+    question_count: int,
+    answer_key: list[str],
+    points: list[float] | None = None,
+) -> tuple[list[str], list[float]]:
+    if len(answer_key) != question_count:
+        raise InvalidAnswerKeyError(
+            f"Expected {question_count} answers, got {len(answer_key)}."
+        )
+    normalized_key = [normalize_answer_key_entry(entry) for entry in answer_key]
+    if points is None:
+        normalized_points = [1.0] * question_count
+    else:
+        if len(points) != question_count:
+            raise InvalidAnswerKeyError(
+                f"Expected {question_count} point values, got {len(points)}."
+            )
+        normalized_points = [_validate_float(p, "point value") for p in points]
+        if any(p < 0 for p in normalized_points):
+            raise InvalidAnswerKeyError("Question point values must be non-negative.")
+    return normalized_key, normalized_points
+
+
+def _validate_float(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise InvalidAnswerKeyError(f"{label} must be a number.")
+    num = float(value)
+    if not math.isfinite(num):
+        raise InvalidAnswerKeyError(f"{label} must be finite.")
+    return num
+
+
+def normalize_question_rules(
+    question_count: int, raw_rules: Any
+) -> list[QuestionRule]:
+    if raw_rules is None:
+        return [QuestionRule()] * question_count
+    if not isinstance(raw_rules, list) or len(raw_rules) != question_count:
+        raise InvalidAnswerKeyError(
+            f"Expected {question_count} question_rules entries."
+        )
+    normalized: list[QuestionRule] = []
+    for entry in raw_rules:
+        if not isinstance(entry, dict):
+            raise InvalidAnswerKeyError("Each question_rule entry must be an object.")
+        alt_raw = entry.get("alternate_answers", entry.get("alternateAnswers", []))
+        if not isinstance(alt_raw, list):
+            raise InvalidAnswerKeyError("alternate_answers must be a list.")
+        alts: list[tuple[str, float]] = []
+        for alt in alt_raw:
+            if not isinstance(alt, dict) or not isinstance(alt.get("choice"), str):
+                raise InvalidAnswerKeyError(
+                    "Each alternate answer must include choice and points."
+                )
+            norm_choice = normalize_answer_key_entry(alt["choice"])
+            alt_pts = _validate_float(alt.get("points"), "alternate answer points")
+            if alt_pts < 0:
+                raise InvalidAnswerKeyError(
+                    "Alternate answer points must be non-negative."
+                )
+            alts.append((norm_choice, alt_pts))
+        inc_raw = entry.get("incorrect_points", entry.get("incorrectPoints", 0.0))
+        incorrect_pts = _validate_float(inc_raw, "incorrect_points")
+        normalized.append(
+            QuestionRule(alternate_answers=tuple(alts), incorrect_points=incorrect_pts)
+        )
+    return normalized
 
 
 def scan_job_needs_review(question_fills: dict[int, QuestionFill]) -> bool:
@@ -113,60 +167,74 @@ def read_text_fields(image: np.ndarray, page: PageSize = PAGE) -> dict[str, str]
     return values
 
 
-def grade_scan_job(scan_job_id: int, force: bool = False) -> ScanResultRecord:
-    """Run one scan job through classification and scoring, store the result, and mark
-    the scan job done."""
-    scan_job = get_scan_job(scan_job_id)
-    if scan_job.status == "done" and not force:
-        raise ScanJobAlreadyGradedError(scan_job_id)
-    try:
-        batch = get_batch(scan_job.batch_id)
-        test = get_test(batch.test_id)
-        template_spec = get_template_spec(test.template_id)
+def grade_image_array(
+    image: np.ndarray,
+    template_spec: TemplateSpec,
+    answer_key: list[str],
+    points: list[float] | None = None,
+    question_rules: list[QuestionRule] | None = None,
+) -> tuple[np.ndarray, dict[int, QuestionFill], ScoreSummary, dict[str, str]]:
+    """Run alignment, bubble classification, scoring, and OCR on an in-memory image."""
+    aligned_image = align_scan(image, template_spec)
+    question_fills = classify_sheet(aligned_image, template_spec)
+    score_summary = score_sheet(
+        question_fills, answer_key, points=points, question_rules=question_rules
+    )
+    text_fields = read_text_fields(aligned_image)
+    return aligned_image, question_fills, score_summary, text_fields
 
-        image = load_scan_image(scan_job.raw_image_path)
-        aligned_image = align_scan(image, template_spec)
-        processed_dir = Path(get_settings().autograde_data_dir) / "processed"
-        processed_dir.mkdir(parents=True, exist_ok=True)
-        processed_image_path = str(processed_dir / f"scan_{scan_job.id}.png")
-        cv2.imwrite(processed_image_path, aligned_image)
 
-        question_fills = classify_sheet(aligned_image, template_spec)
-        score_summary = score_sheet(question_fills, test.answer_key)
-        text_fields = read_text_fields(aligned_image)
-        try:
-            existing = get_scan_result(scan_job.id)
-        except ScanResultNotFoundError:
-            existing = None
+def grade_image_with_versions(
+    image: np.ndarray,
+    template_spec: TemplateSpec,
+    *,
+    primary_key: ResolvedKeySpec,
+    key_versions: dict[str, ResolvedKeySpec] | None = None,
+) -> tuple[
+    np.ndarray,
+    dict[int, QuestionFill],
+    ScoreSummary,
+    dict[str, str],
+    str,
+    bool,
+    ResolvedKeySpec,
+]:
+    """Align, detect printed Key Version A-D, select matching key, score, and OCR."""
+    aligned_image = align_scan(image, template_spec)
+    ink_map = calibrate_sheet_ink(to_grayscale(aligned_image), PAGE)
+    kv_fill = classify_key_version(aligned_image, PAGE, ink_map=ink_map)
+    detected_version = (
+        kv_fill.marked_choices[0]
+        if kv_fill.result == BubbleResult.FILLED
+        and kv_fill.marked_choices[0] in KEY_VERSION_CHOICES
+        else ""
+    )
+    version_map = {"A": primary_key, **(key_versions or {})}
+    version_flagged = kv_fill.result in (
+        BubbleResult.AMBIGUOUS,
+        BubbleResult.MULTIPLE,
+    ) or (
+        len(version_map) > 1
+        and bool(detected_version)
+        and detected_version not in version_map
+    )
 
-        save_scan_result(
-            NewScanResult(
-                scan_job_id=scan_job.id,
-                name_text=(
-                    existing.name_text
-                    if existing and existing.name_text
-                    else text_fields.get("name", "")
-                ),
-                date_text=(
-                    existing.date_text
-                    if existing and existing.date_text
-                    else text_fields.get("date", "")
-                ),
-                section_text=(
-                    existing.section_text
-                    if existing and existing.section_text
-                    else text_fields.get("section", "")
-                ),
-                score=score_summary.score_fraction * 100,
-                answers_json=question_fills_to_answers_json(question_fills),
-                flags_json=question_fills_to_flags_json(question_fills),
-                needs_review=scan_job_needs_review(question_fills),
-                processed_image_path=processed_image_path,
-            )
-        )
-        update_scan_job_status(scan_job.id, "done")
-        return apply_scan_corrections(scan_job.id, {})
-    except Exception as exc:
-        record_scan_error(scan_job.id, str(exc))
-        update_scan_job_status(scan_job.id, "failed")
-        raise
+    active_key = version_map.get(detected_version, primary_key)
+
+    question_fills = classify_sheet(aligned_image, template_spec, ink_map=ink_map)
+    score_summary = score_sheet(
+        question_fills,
+        active_key.answer_key,
+        points=active_key.points,
+        question_rules=active_key.question_rules,
+    )
+    text_fields = read_text_fields(aligned_image)
+    return (
+        aligned_image,
+        question_fills,
+        score_summary,
+        text_fields,
+        detected_version,
+        version_flagged,
+        active_key,
+    )

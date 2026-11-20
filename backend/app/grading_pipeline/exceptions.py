@@ -1,11 +1,7 @@
 class ScanImageUnreadableError(Exception):
-    def __init__(self, image_path: str) -> None:
-        super().__init__(f"Could not read scan image at {image_path}.")
+    def __init__(self, detail: str = "Could not decode uploaded scan image.") -> None:
+        super().__init__(detail)
 
 
-class ScanJobAlreadyGradedError(Exception):
-    def __init__(self, scan_job_id: int) -> None:
-        super().__init__(f"Scan job {scan_job_id} has already been graded.")
-
-
-
+class InvalidAnswerKeyError(Exception):
+    pass

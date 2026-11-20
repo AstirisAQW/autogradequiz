@@ -29,9 +29,12 @@ from app.answer_sheet_templates.geometry import (
     ANSWER_CHOICES,
     BUBBLE_OUTLINE_THICKNESS_PX,
     FIDUCIAL_SIZE_MM,
+    KEY_VERSION_CHOICES,
     PageSize,
     bubble_position_px,
     bubble_radius_px,
+    key_version_bubble_position_px,
+    key_version_bubble_radius_px,
     mm_length_to_px,
 )
 from app.answer_sheet_templates.layout_spec import TemplateSpec
@@ -341,14 +344,44 @@ def classify_sheet(
     template_spec: TemplateSpec,
     page: PageSize = PAGE,
     thresholds: ClassifierThresholds = DEFAULT_THRESHOLDS,
+    *,
+    ink_map: np.ndarray | None = None,
 ) -> dict[int, QuestionFill]:
     """Classify every question on an already-aligned sheet image."""
-    gray_image = to_grayscale(image)
-    ink_map = calibrate_sheet_ink(gray_image, page)
+    resolved_ink = (
+        ink_map if ink_map is not None else calibrate_sheet_ink(to_grayscale(image), page)
+    )
     radius_px = bubble_radius_px(template_spec, page)
     return {
         question_number: classify_question(
-            ink_map, template_spec, question_number, radius_px, page, thresholds
+            resolved_ink, template_spec, question_number, radius_px, page, thresholds
         )
         for question_number in range(1, template_spec.question_count + 1)
     }
+
+
+def classify_key_version(
+    image: np.ndarray,
+    page: PageSize = PAGE,
+    thresholds: ClassifierThresholds = DEFAULT_THRESHOLDS,
+    *,
+    ink_map: np.ndarray | None = None,
+) -> QuestionFill:
+    """Classify the printed Key Version strip (A-D) on an aligned sheet."""
+    resolved_ink = (
+        ink_map if ink_map is not None else calibrate_sheet_ink(to_grayscale(image), page)
+    )
+    radius_px = key_version_bubble_radius_px(page)
+    bubble_fills = tuple(
+        (
+            choice,
+            measure_bubble_ink(
+                resolved_ink,
+                key_version_bubble_position_px(idx, page),
+                radius_px,
+                thresholds,
+            ),
+        )
+        for idx, choice in enumerate(KEY_VERSION_CHOICES)
+    )
+    return aggregate_question_fill(bubble_fills, thresholds)

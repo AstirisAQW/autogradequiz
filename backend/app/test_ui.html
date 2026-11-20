@@ -3,872 +3,555 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AutoGradeQuiz — Backend Testing UI</title>
+  <title>AutoGradeQuiz Backend Sandbox</title>
   <link rel="icon" href="data:," />
   <style>
     :root {
       color-scheme: light;
-      --bg: #f4f4f5;
-      --card: #ffffff;
-      --subtle: #fafafa;
-      --border: #e4e4e7;
-      --border-strong: #d4d4d8;
+      --bg: #fafafa;
+      --surface: #ffffff;
+      --subtle: #f4f4f5;
+      --border: rgba(0, 0, 0, 0.08);
+      --border-strong: rgba(0, 0, 0, 0.16);
       --text: #18181b;
       --muted: #52525b;
-      --accent: #18181b;
-      --ok: #15803d;
-      --ok-bg: #f0fdf4;
-      --ok-bd: #86efac;
-      --warn: #b45309;
-      --warn-bg: #fffbeb;
-      --warn-bd: #fcd34d;
-      --err: #b91c1c;
-      --err-bg: #fef2f2;
-      --err-bd: #fca5a5;
+      --brand: #004d38;
+      --brand-hover: #003b2b;
+      --brand-soft: #e6f2ee;
+      --ok: #14532d;
+      --ok-bg: #dcfce7;
+      --err: #7f1d1d;
+      --err-bg: #fee2e2;
+      --radius: 8px;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-size: 14px;
       background: var(--bg);
       color: var(--text);
       line-height: 1.45;
       -webkit-font-smoothing: antialiased;
     }
     header {
-      background: var(--card);
-      border-bottom: 1px solid var(--border);
-      padding: 12px 20px;
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: var(--brand);
+      color: #ffffff;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.18);
+      padding: 10px 20px;
       display: flex;
       flex-wrap: wrap;
       gap: 12px;
       align-items: center;
       justify-content: space-between;
     }
-    header h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
-    .num { font-variant-numeric: tabular-nums; }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      padding: 2px 9px;
+    header h1 { margin: 0; font-size: 16px; font-weight: 500; }
+    .header-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; }
+    .ctx-badge {
+      padding: 3px 9px;
       border-radius: 999px;
+      background: rgba(255, 255, 255, 0.14);
+      color: #ffffff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 12px;
-      font-weight: 600;
-      border: 1px solid var(--border-strong);
-      background: var(--subtle);
     }
-    .pill.ok { color: var(--ok); border-color: var(--ok-bd); background: var(--ok-bg); }
-    .pill.err { color: var(--err); border-color: var(--err-bd); background: var(--err-bg); }
-    .pill.warn { color: var(--warn); border-color: var(--warn-bd); background: var(--warn-bg); }
-    main {
-      max-width: 1340px;
-      margin: 16px auto;
-      padding: 0 16px 36px;
+    .shell {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 20px;
       display: grid;
-      grid-template-columns: 1.15fr 0.85fr;
-      gap: 16px;
+      grid-template-columns: 196px minmax(0, 1fr) 390px;
+      gap: 20px;
       align-items: start;
     }
-    @media (max-width: 980px) {
-      main { grid-template-columns: 1fr; }
+    @media (max-width: 1080px) {
+      .shell { grid-template-columns: 1fr; }
     }
-    .stack { display: grid; gap: 16px; }
-    section {
-      background: var(--card);
+    .sidebar {
+      position: sticky;
+      top: 64px;
+      background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: 12px;
+      padding: 8px;
+      display: grid;
+      gap: 4px;
+    }
+    .nav-btn {
+      width: 100%;
+      text-align: left;
+      padding: 8px 12px;
+      border: none;
+      border-radius: var(--radius);
+      background: transparent;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .nav-btn:hover { background: var(--subtle); }
+    .nav-btn.active { background: var(--brand); color: #ffffff; }
+    .center { display: grid; gap: 16px; min-width: 0; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
       padding: 16px;
     }
-    .section-head {
+    .card-head {
       display: flex;
+      flex-wrap: wrap;
       justify-content: space-between;
       align-items: center;
       gap: 8px;
       margin-bottom: 12px;
     }
-    h2 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
-    h3 { margin: 14px 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
-    label { display: block; font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 4px; }
-    input, select {
+    h2 { margin: 0; font-size: 16px; font-weight: 500; }
+    h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; color: var(--muted); }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+    .field { display: grid; gap: 4px; min-width: 120px; flex: 1; }
+    label { font-size: 12px; font-weight: 500; color: var(--muted); }
+    input, select, textarea {
       width: 100%;
       padding: 7px 10px;
       border: 1px solid var(--border-strong);
-      border-radius: 6px;
-      font: inherit;
-      font-size: 13px;
-      background: #fff;
+      border-radius: var(--radius);
+      background: var(--surface);
       color: var(--text);
+      font-size: 13px;
+      font-family: inherit;
     }
-    input:focus, select:focus, button:focus-visible, a.btn:focus-visible {
-      outline: 2px solid #18181b;
-      outline-offset: 2px;
-    }
-    .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 10px; }
-    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
-    button, a.btn {
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       padding: 7px 12px;
-      border-radius: 6px;
-      border: 1px solid var(--accent);
-      background: var(--accent);
-      color: #fff;
-      font: inherit;
+      border-radius: var(--radius);
+      border: 1px solid var(--border-strong);
+      background: var(--surface);
+      color: var(--text);
       font-size: 13px;
       font-weight: 500;
       cursor: pointer;
       text-decoration: none;
+    }
+    .btn:hover { background: var(--subtle); }
+    .btn.primary { background: var(--brand); border-color: var(--brand); color: #ffffff; }
+    .btn.primary:hover { background: var(--brand-hover); }
+    .btn.sm { padding: 4px 9px; font-size: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .pill {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      transition: opacity 0.12s ease, background-color 0.12s ease;
-    }
-    button:hover:not(:disabled), a.btn:hover { opacity: 0.9; }
-    button.secondary, a.btn.secondary {
-      background: #fff;
-      color: var(--text);
-      border-color: var(--border-strong);
-    }
-    button.secondary:hover:not(:disabled), a.btn.secondary:hover { background: var(--subtle); opacity: 1; }
-    button.sm, a.btn.sm { padding: 4px 9px; font-size: 12px; }
-    button.choice {
-      background: #fff;
-      color: var(--text);
-      border-color: var(--border-strong);
-      padding: 4px 10px;
-      font-size: 12px;
-    }
-    button.choice.active {
-      background: var(--accent);
-      color: #fff;
-      border-color: var(--accent);
-    }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .muted { font-size: 12px; color: var(--muted); }
-    .subcard {
-      border: 1px solid var(--border);
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 500;
       background: var(--subtle);
-      border-radius: 8px;
-      padding: 12px;
-      margin-top: 10px;
+      color: var(--muted);
     }
-    .notice {
-      margin-top: 10px;
-      padding: 8px 10px;
-      border-radius: 6px;
-      font-size: 12px;
+    .pill.ok { background: var(--ok-bg); color: var(--ok); }
+    .pill.err { background: var(--err-bg); color: var(--err); }
+    .inspector {
+      position: sticky;
+      top: 64px;
+      display: grid;
+      gap: 16px;
+      max-height: calc(100vh - 84px);
+      overflow-y: auto;
+    }
+    .img-box {
       border: 1px solid var(--border);
+      border-radius: var(--radius);
       background: var(--subtle);
-      display: none;
-    }
-    .notice.show { display: block; }
-    .notice.err { color: var(--err); border-color: var(--err-bd); background: var(--err-bg); }
-    .notice.ok { color: var(--ok); border-color: var(--ok-bd); background: var(--ok-bg); }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
-    th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-    th { color: var(--muted); font-weight: 600; }
-    pre {
-      margin: 0;
-      padding: 12px;
-      background: #18181b;
-      color: #f4f4f5;
-      border-radius: 6px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 12px;
-      overflow: auto;
-      max-height: 380px;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    .preview {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--subtle);
-      padding: 10px;
-      min-height: 180px;
+      min-height: 160px;
       display: flex;
       align-items: center;
       justify-content: center;
+      overflow: hidden;
+      padding: 8px;
+      color: var(--muted);
+      font-size: 12px;
       text-align: center;
     }
-    .preview img { max-width: 100%; max-height: 360px; object-fit: contain; display: block; }
-    .sticky { position: sticky; top: 16px; display: grid; gap: 16px; }
-    .flag-row {
+    .img-box img { max-width: 100%; max-height: 280px; object-fit: contain; display: block; }
+    .log-list { display: grid; gap: 6px; max-height: 170px; overflow-y: auto; margin-bottom: 10px; }
+    .log-item {
+      width: 100%;
+      text-align: left;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 6px 9px;
+      cursor: pointer;
       display: flex;
-      flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      padding: 6px 0;
-      border-bottom: 1px solid var(--border);
+      font-size: 12px;
     }
-    .flag-row:last-child { border-bottom: 0; }
-    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+    .log-item.active { border-color: var(--brand); background: var(--brand-soft); }
+    .log-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    pre.json-view {
+      margin: 0;
+      padding: 10px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--subtle);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      max-height: 260px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .hidden { display: none !important; }
+    .muted { color: var(--muted); font-size: 12px; }
   </style>
 </head>
 <body>
   <header>
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <h1>AutoGradeQuiz Backend Sandbox</h1>
-      <span id="health-pill" class="pill" aria-live="polite">Checking /health...</span>
-      <span id="context-pill" class="pill num">No active batch</span>
-    </div>
-    <div class="actions" style="margin:0;">
-      <button class="secondary sm" type="button" onclick="checkHealth()">Ping /health</button>
-      <a class="btn secondary sm" href="/docs" target="_blank" rel="noopener">OpenAPI /docs</a>
+    <h1>AutoGradeQuiz Backend Sandbox</h1>
+    <div class="header-meta">
+      <span class="ctx-badge" id="ctx-template">Template: 20q_a4</span>
+      <span class="ctx-badge" id="ctx-score">Last score: —</span>
+      <span class="pill" id="header-health">Health: ?</span>
     </div>
   </header>
 
-  <main>
-    <div class="stack">
-      <section>
-        <div class="section-head">
-          <h2>1. Test &amp; Answer Key</h2>
-          <span id="key-count" class="pill num">20 / 20</span>
-        </div>
-        <div class="row">
-          <div>
-            <label for="test-name">Test name</label>
-            <input id="test-name" value="Dev Test" />
+  <div class="shell">
+    <aside class="sidebar" aria-label="Tools">
+      <button type="button" class="nav-btn active" data-tab="grade">Grade Sheet</button>
+      <button type="button" class="nav-btn" data-tab="scan-key">Scan Key</button>
+      <button type="button" class="nav-btn" data-tab="templates">Templates</button>
+      <button type="button" class="nav-btn" data-tab="health">Health &amp; Docs</button>
+    </aside>
+
+    <main class="center">
+      <section id="panel-grade" class="card">
+        <div class="card-head">
+          <h2>Stateless Grade (POST /grade)</h2>
+          <div class="row">
+            <button type="button" class="btn sm" id="btn-synth-download">Download Synthetic Sheet (.jpg)</button>
+            <button type="button" class="btn primary sm" id="btn-synth-grade">Generate &amp; Grade Synthetic Sheet</button>
           </div>
-          <div>
-            <label for="template-id">Template</label>
-            <select id="template-id" onchange="fillKey('cycle')">
-              <option value="20q_a4">20q_a4 (20 questions)</option>
-              <option value="50q_a4">50q_a4 (50 questions)</option>
-              <option value="100q_a4">100q_a4 (100 questions)</option>
+        </div>
+        <div class="row" style="margin-bottom: 12px;">
+          <div class="field">
+            <label for="synth-name">Sample Name</label>
+            <input id="synth-name" type="text" value="Dela Cruz, Juan" />
+          </div>
+          <div class="field">
+            <label for="synth-student-id">Sample Student ID</label>
+            <input id="synth-student-id" type="text" value="0123456789" />
+          </div>
+          <div class="field" style="max-width: 140px;">
+            <label for="synth-section">Sample Section</label>
+            <input id="synth-section" type="text" value="10-Rizal" />
+          </div>
+          <div class="field" style="max-width: 140px;">
+            <label for="synth-date">Sample Date</label>
+            <input id="synth-date" type="text" value="2026-11-18" />
+          </div>
+          <div class="field" style="max-width: 110px;">
+            <label for="synth-key-version">Key Version</label>
+            <select id="synth-key-version">
+              <option value="">None</option>
+              <option value="A">A</option>
+              <option value="B">B</option>
+              <option value="C">C</option>
+              <option value="D">D</option>
             </select>
           </div>
         </div>
-        <div>
-          <label for="answer-key">Answer key (letters A-E; any non A-E chars are ignored)</label>
-          <input id="answer-key" class="num" value="ABCDEABCDEABCDEABCDE" oninput="updateKeyMeta()" />
-        </div>
-        <div class="actions">
-          <button type="button" onclick="withBusy(this, createTestAndBatch)">Create Test &amp; Batch</button>
-          <button class="secondary sm" type="button" onclick="fillKey('cycle')">ABCDE...</button>
-          <button class="secondary sm" type="button" onclick="fillKey('allA')">All A</button>
-          <button class="secondary sm" type="button" onclick="fillKey('random')">Random key</button>
-        </div>
-
-        <div class="row" style="margin-top:12px;">
-          <div>
-            <label for="test-id">Active Test ID</label>
-            <input id="test-id" class="num" type="number" min="1" placeholder="e.g. 1" oninput="saveIds()" />
+        <form id="form-grade" class="row">
+          <div class="field" style="max-width: 140px;">
+            <label for="grade-template">Template</label>
+            <select id="grade-template">
+              <option value="20q_a4">20q_a4</option>
+              <option value="50q_a4">50q_a4</option>
+              <option value="100q_a4">100q_a4</option>
+            </select>
           </div>
-          <div>
-            <label for="batch-id">Active Batch ID</label>
-            <input id="batch-id" class="num" type="number" min="1" placeholder="e.g. 1" oninput="saveIds(); syncLinks()" />
+          <div class="field">
+            <label for="grade-file">Sheet image (PNG/JPEG)</label>
+            <input id="grade-file" type="file" accept="image/png,image/jpeg" required />
           </div>
-        </div>
-        <div class="actions">
-          <button class="secondary sm" type="button" onclick="withBusy(this, createTest)">POST /tests only</button>
-          <button class="secondary sm" type="button" onclick="withBusy(this, createBatch)">POST /tests/{id}/batches</button>
-          <button class="secondary sm" type="button" onclick="withBusy(this, loadResults)">Refresh results</button>
-          <a id="csv-link" class="btn secondary sm" href="#" target="_blank" rel="noopener">Download CSV</a>
-        </div>
-        <div id="notice-1" class="notice" role="status" aria-live="polite"></div>
+          <button type="submit" class="btn primary">POST /grade</button>
+        </form>
       </section>
 
-      <section>
-        <div class="section-head">
-          <h2>2. Synthetic Sheets &amp; Real Uploads</h2>
-          <span class="muted">Grades against your active test key</span>
+      <section id="panel-scan-key" class="card hidden">
+        <div class="card-head">
+          <h2>Scan Answer Key (POST /tests/scan-key)</h2>
         </div>
+        <form id="form-scan-key" class="row">
+          <div class="field" style="max-width: 140px;">
+            <label for="key-template">Template</label>
+            <select id="key-template">
+              <option value="20q_a4">20q_a4</option>
+              <option value="50q_a4">50q_a4</option>
+              <option value="100q_a4">100q_a4</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="key-file">Master key image</label>
+            <input id="key-file" type="file" accept="image/png,image/jpeg" required />
+          </div>
+          <button type="submit" class="btn primary">POST /tests/scan-key</button>
+        </form>
+      </section>
 
-        <div class="subcard">
-          <h3 style="margin-top:0;">Generate synthetic answer sheets</h3>
+      <section id="panel-templates" class="card hidden">
+        <div class="card-head">
+          <h2>Templates</h2>
+          <button type="button" class="btn primary sm" id="btn-get-templates">GET /templates</button>
+        </div>
+        <p class="muted">Fetch available answer sheet templates and their question counts.</p>
+      </section>
+
+      <section id="panel-health" class="card hidden">
+        <div class="card-head">
+          <h2>Health &amp; OpenAPI</h2>
           <div class="row">
-            <div>
-              <label for="syn-seed">Start seed</label>
-              <input id="syn-seed" class="num" type="number" min="0" value="0" oninput="syncLinks()" />
-            </div>
-            <div>
-              <label for="syn-count">Sheets to generate (1-10)</label>
-              <input id="syn-count" class="num" type="number" min="1" max="10" value="3" />
-            </div>
-          </div>
-          <div class="actions">
-            <button id="btn-gen-grade" type="button" onclick="generateAndGradeBatch()">Generate + Upload + Grade</button>
-            <a id="syn-dl-link" class="btn secondary sm" href="#" target="_blank" rel="noopener">Download seed PNG</a>
+            <button type="button" class="btn primary sm" id="btn-get-health">GET /health</button>
+            <a class="btn sm" href="/docs" target="_blank">Open /docs</a>
           </div>
         </div>
+        <p class="muted">Stateless CV + OCR grading backend.</p>
+      </section>
+    </main>
 
-        <div class="subcard">
-          <h3 style="margin-top:0;">Upload PNG / JPEG scans</h3>
+    <aside class="inspector">
+      <div class="card">
+        <div class="card-head">
+          <h3>Aligned JPEG Preview</h3>
           <div class="row">
-            <div>
-              <label for="scan-file">Scan image(s)</label>
-              <input id="scan-file" type="file" accept="image/png,image/jpeg" multiple />
-            </div>
-            <div>
-              <label for="scan-job-id">Active Scan Job ID</label>
-              <input id="scan-job-id" class="num" type="number" min="1" placeholder="e.g. 1" oninput="saveIds(); syncLinks()" />
-            </div>
-          </div>
-          <div class="actions">
-            <button id="btn-upload-grade" type="button" onclick="uploadAndGradeAll()">Upload + Grade selected</button>
-            <button class="secondary sm" type="button" onclick="withBusy(this, uploadOnly)">Upload only</button>
-            <button class="secondary sm" type="button" onclick="withBusy(this, () => gradeScan(false))">Grade</button>
-            <button class="secondary sm" type="button" onclick="withBusy(this, () => gradeScan(true))">Regrade (?force=true)</button>
+            <button type="button" class="btn sm primary" id="btn-view-graded">Graded overlay</button>
+            <button type="button" class="btn sm" id="btn-view-aligned">Clean aligned</button>
           </div>
         </div>
-
-        <div id="notice-2" class="notice" role="status" aria-live="polite"></div>
-        <div id="batch-results"></div>
-      </section>
-
-      <section>
-        <div class="section-head">
-          <h2>3. Review Queue, Corrections &amp; Identity</h2>
-          <button class="secondary sm" type="button" onclick="withBusy(this, loadReviewQueue)">Refresh queue</button>
+        <div class="img-box" id="image-preview-box">Run POST /grade to preview the aligned sheet.</div>
+        <div class="muted" id="preview-meta" style="margin-top: 8px;"></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h3>Request log</h3>
+          <button type="button" class="btn sm" id="btn-copy-json">Copy JSON</button>
         </div>
-        <div id="review-queue"><p class="muted" style="margin:0;">Click "Refresh queue" to load scans needing review.</p></div>
-
-        <div id="flag-editor" class="subcard" style="display:none;">
-          <h3 style="margin-top:0;">Flagged questions for Scan #<span id="flag-scan-id" class="num"></span></h3>
-          <div id="flag-list"></div>
-        </div>
-
-        <div class="row" style="margin-top:12px;">
-          <div>
-            <label for="corrections-json">Corrections JSON (for Active Scan Job ID)</label>
-            <input id="corrections-json" class="num" value='{"1": "A"}' />
-            <div class="actions">
-              <button type="button" onclick="withBusy(this, patchCorrections)">Save corrections</button>
-            </div>
-          </div>
-          <div>
-            <label for="id-name">Identity fields</label>
-            <div class="row" style="margin-bottom:6px;">
-              <div>
-                <label for="id-name" class="sr-only">Name</label>
-                <input id="id-name" placeholder="Name" />
-              </div>
-              <div>
-                <label for="id-date" class="sr-only">Date</label>
-                <input id="id-date" placeholder="Date" />
-              </div>
-              <div>
-                <label for="id-section" class="sr-only">Section</label>
-                <input id="id-section" placeholder="Section" />
-              </div>
-            </div>
-            <div class="actions">
-              <button type="button" onclick="withBusy(this, patchIdentity)">Save identity</button>
-            </div>
-          </div>
-        </div>
-        <div id="notice-3" class="notice" role="status" aria-live="polite"></div>
-      </section>
-    </div>
-
-    <div class="sticky">
-      <section>
-        <div class="section-head">
-          <h2>Scan Image Preview</h2>
-          <div class="actions" style="margin:0;">
-            <button class="secondary sm" type="button" onclick="viewImage()">Load active scan</button>
-            <a id="img-open-link" class="btn secondary sm" href="#" target="_blank" rel="noopener" style="display:none;">Open full</a>
-          </div>
-        </div>
-        <div id="image-preview" class="preview">
-          <span class="muted">Select "Image" or "Review" on any scan to inspect it here.</span>
-        </div>
-      </section>
-
-      <section>
-        <div class="section-head">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <h2>Last API Response</h2>
-            <span id="resp-status" class="pill" style="display:none;"></span>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span id="resp-meta" class="muted num">No request yet</span>
-            <button class="secondary sm" type="button" onclick="copyResponse(this)">Copy</button>
-          </div>
-        </div>
-        <pre id="resp-body">Click any action on the left to inspect the raw API response.</pre>
-      </section>
-    </div>
-  </main>
+        <div class="log-list" id="log-list"></div>
+        <pre class="json-view" id="log-json">No requests yet.</pre>
+      </div>
+    </aside>
+  </div>
 
   <script>
-    const $ = (id) => document.getElementById(id);
-    const STORAGE_KEY = "autograde_test_ui_ids_v1";
-    let reviewRows = [];
-    let draftCorrections = {};
+    const state = { logs: [], selectedLogIdx: 0, lastGradeResponse: null, previewMode: "graded" };
+    const CHOICES = ["A", "B", "C", "D", "E"];
+    const COUNTS = { "20q_a4": 20, "50q_a4": 50, "100q_a4": 100 };
 
-    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => (
-      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
-    ));
-
-    function templateCount(tpl) {
-      return tpl === "100q_a4" ? 100 : tpl === "50q_a4" ? 50 : 20;
+    function esc(v) {
+      return String(v ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      })[c]);
     }
 
-    function parsedKeyLetters() {
-      return $("answer-key").value.toUpperCase().replace(/[^A-E]/g, "").split("");
+    function renderLogs() {
+      const list = document.getElementById("log-list");
+      const pre = document.getElementById("log-json");
+      if (!state.logs.length) return;
+      list.innerHTML = state.logs.map((entry, idx) => {
+        const cls = entry.status >= 200 && entry.status < 300 ? "ok" : "err";
+        const active = idx === state.selectedLogIdx ? "active" : "";
+        return `<button type="button" class="log-item ${active}" data-log-idx="${idx}">
+          <span class="mono"><strong>${esc(entry.method)}</strong></span>
+          <span class="log-path mono">${esc(entry.path)}</span>
+          <span class="pill ${cls}">${entry.status}</span>
+          <span class="muted mono">${entry.durationMs}ms</span>
+        </button>`;
+      }).join("");
+      const current = state.logs[state.selectedLogIdx] || state.logs[0];
+      pre.textContent = typeof current.body === "string"
+        ? current.body
+        : JSON.stringify(current.body, null, 2);
     }
 
-    function updateKeyMeta() {
-      const need = templateCount($("template-id").value);
-      const got = parsedKeyLetters().length;
-      const el = $("key-count");
-      el.textContent = `${got} / ${need}`;
-      el.className = `pill num ${got === need ? "ok" : "warn"}`;
+    async function apiFetch(path, options = {}) {
+      const started = performance.now();
+      const method = (options.method || "GET").toUpperCase();
+      const res = await fetch(path, options);
+      const durationMs = Math.round(performance.now() - started);
+      const text = await res.text();
+      let body = text;
+      try { body = text ? JSON.parse(text) : null; } catch {}
+      state.logs.unshift({ method, path, status: res.status, durationMs, body });
+      state.selectedLogIdx = 0;
+      renderLogs();
+      return body;
     }
 
-    function fillKey(mode) {
-      const n = templateCount($("template-id").value);
-      const choices = ["A", "B", "C", "D", "E"];
-      let out = "";
-      if (mode === "allA") {
-        out = "A".repeat(n);
-      } else if (mode === "random") {
-        for (let i = 0; i < n; i += 1) out += choices[Math.floor(Math.random() * 5)];
-      } else {
-        out = "ABCDE".repeat(n / 5);
-      }
-      $("answer-key").value = out;
-      updateKeyMeta();
-      syncLinks();
-    }
+    document.querySelectorAll(".nav-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const tab = btn.dataset.tab;
+        document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b === btn));
+        ["grade", "scan-key", "templates", "health"].forEach((id) => {
+          document.getElementById("panel-" + id).classList.toggle("hidden", id !== tab);
+        });
+      });
+    });
 
-    function saveIds() {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-          testId: $("test-id").value.trim(),
-          batchId: $("batch-id").value.trim(),
-          scanJobId: $("scan-job-id").value.trim(),
-        }));
-      } catch {}
-    }
+    document.getElementById("log-list").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-log-idx]");
+      if (!btn) return;
+      state.selectedLogIdx = Number(btn.dataset.logIdx);
+      renderLogs();
+    });
 
-    function restoreIds() {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return;
-        const ids = JSON.parse(raw);
-        if (ids.testId) $("test-id").value = ids.testId;
-        if (ids.batchId) $("batch-id").value = ids.batchId;
-        if (ids.scanJobId) $("scan-job-id").value = ids.scanJobId;
-      } catch {}
-    }
-
-    function syncLinks() {
-      const testId = $("test-id").value.trim();
-      const batchId = $("batch-id").value.trim();
-      const scanId = $("scan-job-id").value.trim();
-      $("csv-link").href = batchId ? `/batches/${encodeURIComponent(batchId)}/export.csv` : "#";
-      const tpl = encodeURIComponent($("template-id").value);
-      const seed = encodeURIComponent($("syn-seed").value || "0");
-      $("syn-dl-link").href = `/test-ui/synthetic-sheet?template_id=${tpl}&seed=${seed}`;
-      const parts = [];
-      if (testId) parts.push(`Test #${testId}`);
-      if (batchId) parts.push(`Batch #${batchId}`);
-      if (scanId) parts.push(`Scan #${scanId}`);
-      $("context-pill").textContent = parts.length ? parts.join(" · ") : "No active batch";
-    }
-
-    function setNotice(num, kind, msg) {
-      const el = $(`notice-${num}`);
-      if (!msg) {
-        el.className = "notice";
-        el.textContent = "";
-        return;
-      }
-      el.className = `notice show ${kind}`;
-      el.textContent = msg;
-    }
-
-    async function withBusy(btn, fn) {
-      if (!btn) return fn();
-      btn.disabled = true;
-      try {
-        return await fn();
-      } finally {
-        btn.disabled = false;
-      }
-    }
-
-    async function copyResponse(btn) {
-      try {
-        await navigator.clipboard.writeText($("resp-body").textContent || "");
-        const prev = btn.textContent;
-        btn.textContent = "Copied";
-        setTimeout(() => { btn.textContent = prev; }, 1200);
-      } catch {}
-    }
-
-    async function api(method, url, options = {}) {
-      const t0 = performance.now();
-      const statusPill = $("resp-status");
-      try {
-        const res = await fetch(url, options);
-        const ms = Math.round(performance.now() - t0);
-        const text = await res.text();
-        let data = text;
-        try { data = JSON.parse(text); } catch {}
-        statusPill.style.display = "inline-flex";
-        statusPill.className = `pill num ${res.ok ? "ok" : "err"}`;
-        statusPill.textContent = String(res.status);
-        $("resp-meta").textContent = `${method} ${url} (${ms} ms)`;
-        $("resp-body").textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
-        return { ok: res.ok, status: res.status, data };
-      } catch (err) {
-        const ms = Math.round(performance.now() - t0);
-        statusPill.style.display = "inline-flex";
-        statusPill.className = "pill err";
-        statusPill.textContent = "ERR";
-        $("resp-meta").textContent = `${method} ${url} (${ms} ms)`;
-        $("resp-body").textContent = String(err);
-        return { ok: false, status: 0, data: null };
-      }
-    }
+    document.getElementById("btn-copy-json").addEventListener("click", async () => {
+      await navigator.clipboard.writeText(document.getElementById("log-json").textContent || "");
+    });
 
     async function checkHealth() {
-      const r = await api("GET", "/health");
-      const pill = $("health-pill");
-      if (r.ok) {
+      const pill = document.getElementById("header-health");
+      try {
+        const res = await apiFetch("/health");
+        pill.textContent = "Health: " + (res.status || "ok");
         pill.className = "pill ok";
-        pill.textContent = "Backend OK";
-      } else {
+      } catch {
+        pill.textContent = "Health: error";
         pill.className = "pill err";
-        pill.textContent = "Backend unreachable";
       }
     }
 
-    async function createTest() {
-      setNotice(1, "", "");
-      const letters = parsedKeyLetters();
-      const r = await api("POST", "/tests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: $("test-name").value.trim() || "Dev Test",
-          template_id: $("template-id").value,
-          answer_key: letters,
-        }),
-      });
-      if (r.ok && r.data?.id) {
-        $("test-id").value = r.data.id;
-        saveIds();
-        syncLinks();
-        setNotice(1, "ok", `Created test #${r.data.id} (${r.data.question_count} questions).`);
-        return r.data.id;
+    document.getElementById("btn-get-health").addEventListener("click", checkHealth);
+    document.getElementById("btn-get-templates").addEventListener("click", () => apiFetch("/templates"));
+
+    function renderPreview() {
+      const box = document.getElementById("image-preview-box");
+      const meta = document.getElementById("preview-meta");
+      const btnGraded = document.getElementById("btn-view-graded");
+      const btnAligned = document.getElementById("btn-view-aligned");
+      const res = state.lastGradeResponse;
+      btnGraded.classList.toggle("primary", state.previewMode === "graded");
+      btnAligned.classList.toggle("primary", state.previewMode === "aligned");
+      if (!res || !res.aligned_image_jpeg_base64) {
+        box.textContent = "Run POST /grade to preview the aligned sheet.";
+        meta.textContent = "";
+        return;
       }
-      setNotice(1, "err", r.data?.detail || `Failed to create test (${r.status}).`);
-      return null;
+      const b64 =
+        state.previewMode === "graded" && res.graded_image_jpeg_base64
+          ? res.graded_image_jpeg_base64
+          : res.aligned_image_jpeg_base64;
+      box.innerHTML = `<img src="data:image/jpeg;base64,${b64}" alt="Preview sheet" />`;
+      meta.textContent = res.workspace_paths
+        ? `Saved in workspace/: ${res.workspace_paths.graded}`
+        : "";
     }
 
-    async function createBatch(testIdOverride) {
-      const testId = testIdOverride ?? $("test-id").value.trim();
-      if (!testId) {
-        setNotice(1, "err", "Enter or create a Test ID first.");
-        return null;
-      }
-      setNotice(1, "", "");
-      const r = await api("POST", `/tests/${encodeURIComponent(testId)}/batches`, { method: "POST" });
-      if (r.ok && r.data?.id) {
-        $("batch-id").value = r.data.id;
-        saveIds();
-        syncLinks();
-        setNotice(1, "ok", `Created batch #${r.data.id} under test #${testId}.`);
-        return r.data.id;
-      }
-      setNotice(1, "err", r.data?.detail || `Failed to create batch (${r.status}).`);
-      return null;
-    }
+    document.getElementById("btn-view-graded").addEventListener("click", () => {
+      state.previewMode = "graded";
+      renderPreview();
+    });
+    document.getElementById("btn-view-aligned").addEventListener("click", () => {
+      state.previewMode = "aligned";
+      renderPreview();
+    });
 
-    async function createTestAndBatch() {
-      const testId = await createTest();
-      if (!testId) return;
-      const batchId = await createBatch(testId);
-      if (batchId) {
-        setNotice(1, "ok", `Ready: Test #${testId}, Batch #${batchId}.`);
-        await loadResults();
-      }
-    }
-
-    async function generateAndGradeBatch() {
-      const batchId = $("batch-id").value.trim();
-      if (!batchId) return setNotice(2, "err", "Create or enter a Batch ID first.");
-      const startSeed = Math.max(0, Number($("syn-seed").value || 0));
-      const count = Math.min(10, Math.max(1, Number($("syn-count").value || 1)));
-      const btn = $("btn-gen-grade");
-      btn.disabled = true;
-      let okCount = 0;
-      let failCount = 0;
-      try {
-        for (let i = 0; i < count; i += 1) {
-          const seed = startSeed + i;
-          setNotice(2, "ok", `Generating & grading seed ${seed} (${i + 1} / ${count})...`);
-          const r = await api("POST", `/test-ui/batches/${encodeURIComponent(batchId)}/synthetic-scans`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ seed, grade: true }),
-          });
-          if (r.ok && r.data?.scan_job_id) {
-            okCount += 1;
-            $("scan-job-id").value = r.data.scan_job_id;
-            saveIds();
-            syncLinks();
-          } else {
-            failCount += 1;
-          }
-        }
-        $("syn-seed").value = String(startSeed + count);
-        syncLinks();
-        setNotice(2, failCount ? "err" : "ok", `Generated ${count} sheet(s): ${okCount} graded, ${failCount} failed.`);
-        await loadResults();
-        await loadReviewQueue();
-      } finally {
-        btn.disabled = false;
-      }
-    }
-
-    async function uploadFile(batchId, file) {
+    document.getElementById("form-grade").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const tpl = document.getElementById("grade-template").value;
+      const input = document.getElementById("grade-file");
+      if (!input.files.length) return;
+      const count = COUNTS[tpl];
+      const key = { answer_key: Array.from({ length: count }, (_, i) => CHOICES[i % 5]) };
       const fd = new FormData();
-      fd.append("file", file);
-      const r = await api("POST", `/batches/${encodeURIComponent(batchId)}/scans`, {
+      fd.append("template_id", tpl);
+      fd.append("answer_key", JSON.stringify(key));
+      fd.append("include_graded_image", "true");
+      fd.append("file", input.files[0]);
+      const res = await apiFetch("/grade", { method: "POST", body: fd });
+      if (res && res.aligned_image_jpeg_base64) {
+        state.lastGradeResponse = res;
+        document.getElementById("ctx-score").textContent = `Last score: ${res.score.toFixed(1)}%`;
+        renderPreview();
+      }
+    });
+
+    async function requestSyntheticSheet() {
+      const tpl = document.getElementById("grade-template").value;
+      const seed = Math.floor(Math.random() * 100);
+      return apiFetch("/test-ui/synthetic-sheet", {
         method: "POST",
-        body: fd,
-      });
-      if (r.ok && r.data?.id) {
-        $("scan-job-id").value = r.data.id;
-        saveIds();
-        syncLinks();
-      }
-      return r;
-    }
-
-    async function uploadOnly() {
-      const batchId = $("batch-id").value.trim();
-      const file = $("scan-file").files[0];
-      if (!batchId || !file) return setNotice(2, "err", "Set Batch ID and choose a file first.");
-      setNotice(2, "", "");
-      const r = await uploadFile(batchId, file);
-      setNotice(2, r.ok ? "ok" : "err", r.ok ? `Uploaded scan #${r.data.id}.` : (r.data?.detail || "Upload failed."));
-      await loadResults();
-    }
-
-    async function gradeScan(force, scanIdOverride) {
-      const scanId = scanIdOverride ?? $("scan-job-id").value.trim();
-      if (!scanId) return setNotice(2, "err", "Set Scan Job ID first.");
-      $("scan-job-id").value = scanId;
-      saveIds();
-      syncLinks();
-      setNotice(2, "", "");
-      const r = await api("POST", `/scans/${encodeURIComponent(scanId)}/grade${force ? "?force=true" : ""}`, {
-        method: "POST",
-      });
-      setNotice(
-        2,
-        r.ok ? "ok" : "err",
-        r.ok ? `Scan #${scanId} graded (${Number(r.data.score).toFixed(1)}%).` : (r.data?.detail || `Grade failed (${r.status}).`)
-      );
-      if ($("batch-id").value.trim()) await loadResults();
-      await loadReviewQueue();
-    }
-
-    async function uploadAndGradeAll() {
-      const batchId = $("batch-id").value.trim();
-      const files = Array.from($("scan-file").files || []);
-      if (!batchId || !files.length) return setNotice(2, "err", "Set Batch ID and choose one or more files.");
-      const btn = $("btn-upload-grade");
-      btn.disabled = true;
-      let okCount = 0;
-      let failCount = 0;
-      try {
-        for (let i = 0; i < files.length; i += 1) {
-          setNotice(2, "ok", `Uploading & grading ${i + 1} / ${files.length}: ${files[i].name}...`);
-          const up = await uploadFile(batchId, files[i]);
-          if (up.ok && up.data?.id) {
-            const gr = await api("POST", `/scans/${up.data.id}/grade`, { method: "POST" });
-            if (gr.ok) okCount += 1; else failCount += 1;
-          } else {
-            failCount += 1;
-          }
-        }
-        setNotice(2, failCount ? "err" : "ok", `Finished ${files.length} file(s): ${okCount} graded, ${failCount} failed.`);
-        await loadResults();
-        await loadReviewQueue();
-      } finally {
-        btn.disabled = false;
-      }
-    }
-
-    async function loadResults() {
-      const batchId = $("batch-id").value.trim();
-      if (!batchId) return;
-      syncLinks();
-      const r = await api("GET", `/batches/${encodeURIComponent(batchId)}/results`);
-      const el = $("batch-results");
-      if (!r.ok || !Array.isArray(r.data)) {
-        el.innerHTML = `<p class="muted" style="margin-top:10px;">${esc(r.data?.detail || "Could not load batch results.")}</p>`;
-        return;
-      }
-      if (!r.data.length) {
-        el.innerHTML = `<p class="muted" style="margin-top:10px;">No scans in batch #${esc(batchId)} yet.</p>`;
-        return;
-      }
-      el.innerHTML = `<table>
-        <thead><tr><th>Scan</th><th>Status</th><th>Score</th><th>Review</th><th>Identity</th><th>Actions</th></tr></thead>
-        <tbody>${r.data.map((row) => `<tr>
-          <td class="num">#${esc(row.scan_job_id)}</td>
-          <td>${esc(row.status)}${row.error_message ? `<div class="muted">${esc(row.error_message)}</div>` : ""}</td>
-          <td class="num">${row.status === "done" ? `${Number(row.score).toFixed(1)}%` : "-"}</td>
-          <td>${row.needs_review ? '<span class="pill warn">Needs review</span>' : (row.status === "done" ? '<span class="pill ok">OK</span>' : "-")}</td>
-          <td>${esc([row.name_text, row.date_text, row.section_text].filter(Boolean).join(" / ") || "-")}</td>
-          <td>
-            <div class="actions" style="margin:0;">
-              <button class="secondary sm" type="button" onclick="gradeScan(${row.status === "done"}, ${Number(row.scan_job_id)})">${row.status === "done" ? "Regrade" : "Grade"}</button>
-              <button class="secondary sm" type="button" onclick="viewImage(${Number(row.scan_job_id)})">Image</button>
-            </div>
-          </td>
-        </tr>`).join("")}</tbody>
-      </table>`;
-    }
-
-    async function loadReviewQueue() {
-      setNotice(3, "", "");
-      const r = await api("GET", "/review-queue");
-      const el = $("review-queue");
-      if (!r.ok || !Array.isArray(r.data)) {
-        el.innerHTML = `<p class="muted">${esc(r.data?.detail || "Could not load review queue.")}</p>`;
-        return;
-      }
-      reviewRows = r.data;
-      if (!r.data.length) {
-        el.innerHTML = `<p class="muted" style="margin:0;">Review queue is empty.</p>`;
-        return;
-      }
-      el.innerHTML = `<table>
-        <thead><tr><th>Scan</th><th>Score</th><th>Flags</th><th>Actions</th></tr></thead>
-        <tbody>${r.data.map((row, idx) => `<tr>
-          <td class="num">#${esc(row.scan_job_id)}</td>
-          <td class="num">${Number(row.score).toFixed(1)}%</td>
-          <td><code>${esc(row.flags_json)}</code></td>
-          <td>
-            <div class="actions" style="margin:0;">
-              <button class="secondary sm" type="button" onclick="selectForReview(${idx})">Review</button>
-              <button class="secondary sm" type="button" onclick="viewImage(${Number(row.scan_job_id)})">Image</button>
-            </div>
-          </td>
-        </tr>`).join("")}</tbody>
-      </table>`;
-    }
-
-    function renderFlagEditor(scanId, flagsJson, answersJson) {
-      const box = $("flag-editor");
-      const list = $("flag-list");
-      let flags = {};
-      let answers = [];
-      try { flags = JSON.parse(flagsJson || "{}"); } catch {}
-      try { answers = JSON.parse(answersJson || "[]"); } catch {}
-      const nums = Array.from(new Set([...(flags.ambiguous || []), ...(flags.multiple || [])])).sort((a, b) => a - b);
-      if (!nums.length) {
-        box.style.display = "none";
-        list.innerHTML = "";
-        return;
-      }
-      $("flag-scan-id").textContent = String(scanId);
-      draftCorrections = {};
-      for (const n of nums) draftCorrections[n] = "A";
-      $("corrections-json").value = JSON.stringify(draftCorrections);
-
-      list.innerHTML = nums.map((n) => {
-        const readVal = answers[n - 1] ?? "";
-        const opts = ["A", "B", "C", "D", "E", ""];
-        return `<div class="flag-row">
-          <div>
-            <strong class="num">Q${n}</strong>
-            <span class="muted">read: ${esc(readVal || "blank")}</span>
-          </div>
-          <div class="actions" style="margin:0;">
-            ${opts.map((v) => `<button type="button" class="choice ${draftCorrections[n] === v ? "active" : ""}" onclick="pickChoice(${n}, '${v}', this)">${v || "Blank"}</button>`).join("")}
-          </div>
-        </div>`;
-      }).join("");
-      box.style.display = "block";
-    }
-
-    function pickChoice(qNum, val, btn) {
-      draftCorrections[qNum] = val;
-      $("corrections-json").value = JSON.stringify(draftCorrections);
-      const siblings = btn.parentElement.querySelectorAll("button.choice");
-      siblings.forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-    }
-
-    function selectForReview(idx) {
-      const row = reviewRows[idx];
-      if (!row) return;
-      $("scan-job-id").value = row.scan_job_id;
-      saveIds();
-      syncLinks();
-      $("id-name").value = row.name_text || "";
-      $("id-date").value = row.date_text || "";
-      $("id-section").value = row.section_text || "";
-      renderFlagEditor(row.scan_job_id, row.flags_json, row.answers_json);
-      viewImage(row.scan_job_id);
-    }
-
-    function viewImage(scanIdOverride) {
-      const scanId = scanIdOverride ?? $("scan-job-id").value.trim();
-      if (!scanId) return setNotice(3, "err", "Set Scan Job ID first.");
-      $("scan-job-id").value = scanId;
-      saveIds();
-      syncLinks();
-      const box = $("image-preview");
-      const openLink = $("img-open-link");
-      const src = `/scans/${encodeURIComponent(scanId)}/image?t=${Date.now()}`;
-      openLink.href = src;
-      openLink.style.display = "inline-flex";
-      box.innerHTML = `<img src="${src}" alt="Scan ${esc(scanId)}" onerror="this.outerHTML='<span class=muted>Image not available (404).</span>'" />`;
-    }
-
-    async function patchCorrections() {
-      const scanId = $("scan-job-id").value.trim();
-      if (!scanId) return setNotice(3, "err", "Set Scan Job ID first.");
-      let parsed;
-      try {
-        parsed = JSON.parse($("corrections-json").value);
-      } catch (e) {
-        return setNotice(3, "err", "Invalid JSON in Corrections: " + e.message);
-      }
-      const r = await api("PATCH", `/scans/${encodeURIComponent(scanId)}/corrections`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ corrections: parsed }),
-      });
-      setNotice(3, r.ok ? "ok" : "err", r.ok ? `Saved corrections for scan #${scanId} (score: ${Number(r.data.score).toFixed(1)}%).` : (r.data?.detail || "Failed to save corrections."));
-      if (r.ok) {
-        await loadReviewQueue();
-        if ($("batch-id").value.trim()) await loadResults();
-      }
-    }
-
-    async function patchIdentity() {
-      const scanId = $("scan-job-id").value.trim();
-      if (!scanId) return setNotice(3, "err", "Set Scan Job ID first.");
-      const r = await api("PATCH", `/scans/${encodeURIComponent(scanId)}/identity`, {
-        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name_text: $("id-name").value,
-          date_text: $("id-date").value,
-          section_text: $("id-section").value,
+          template_id: tpl,
+          seed,
+          key_version: document.getElementById("synth-key-version").value,
+          name_text: document.getElementById("synth-name").value,
+          student_id_text: document.getElementById("synth-student-id").value,
+          section_text: document.getElementById("synth-section").value,
+          date_text: document.getElementById("synth-date").value,
         }),
       });
-      setNotice(3, r.ok ? "ok" : "err", r.ok ? `Updated identity for scan #${scanId}.` : (r.data?.detail || "Failed to update identity."));
-      if (r.ok && $("batch-id").value.trim()) await loadResults();
     }
 
-    restoreIds();
-    updateKeyMeta();
-    syncLinks();
+    document.getElementById("btn-synth-download").addEventListener("click", async () => {
+      const synth = await requestSyntheticSheet();
+      const b64 = synth && synth.jpeg_base64;
+      if (!b64) return;
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: "image/jpeg" });
+      document.getElementById("preview-meta").textContent =
+        `Synthetic JPEG size: ${Math.round(blob.size / 1024)} KB`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `synthetic_${synth.template_id}_seed_${synth.seed}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    document.getElementById("btn-synth-grade").addEventListener("click", async () => {
+      const tpl = document.getElementById("grade-template").value;
+      const synth = await requestSyntheticSheet();
+      const b64 = synth && synth.jpeg_base64;
+      if (!b64) return;
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const fd = new FormData();
+      fd.append("template_id", tpl);
+      const kv = (synth.key_version || "A").toUpperCase();
+      const keyPayload = { answer_key: synth.answer_key };
+      if (kv !== "A") {
+        keyPayload.key_versions = { [kv]: { answer_key: synth.answer_key } };
+      }
+      fd.append("answer_key", JSON.stringify(keyPayload));
+      fd.append("include_graded_image", "true");
+      fd.append("file", new Blob([bytes], { type: "image/jpeg" }), "synthetic.jpg");
+      const res = await apiFetch("/grade", { method: "POST", body: fd });
+      if (res && res.aligned_image_jpeg_base64) {
+        state.lastGradeResponse = res;
+        document.getElementById("ctx-score").textContent = `Last score: ${res.score.toFixed(1)}%`;
+        renderPreview();
+      }
+    });
+
+    document.getElementById("form-scan-key").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const tpl = document.getElementById("key-template").value;
+      const input = document.getElementById("key-file");
+      if (!input.files.length) return;
+      const fd = new FormData();
+      fd.append("file", input.files[0]);
+      await apiFetch(`/tests/scan-key?template_id=${encodeURIComponent(tpl)}`, { method: "POST", body: fd });
+    });
+
     checkHealth();
-    if ($("batch-id").value.trim()) loadResults();
   </script>
 </body>
 </html>

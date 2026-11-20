@@ -48,7 +48,7 @@ def _find_marker_in_window(
 ) -> tuple[float, float] | None:
     img_h, img_w = gray_image.shape[:2]
     sub = gray_image[y0:y1, x0:x1]
-    if int(sub.max()) - int(sub.min()) < 40:
+    if sub.size == 0 or int(sub.max()) - int(sub.min()) < 40:
         return None
     _, binary = cv2.threshold(sub, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)

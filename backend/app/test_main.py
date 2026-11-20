@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import anyio
@@ -10,22 +12,20 @@ import pytest
 
 from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import TWENTY_QUESTIONS
-from app.answer_sheet_templates.geometry import bubble_position_px, bubble_radius_px
-from app.bubble_grading.classifier import classify_sheet
-from app.bubble_grading.scoring import QuestionOutcome, score_sheet
-from app.db.connection import init_db
-from app.main import app
-from app.sheet_rendering.renderer import (
-    blank_canvas,
-    render_sheet,
+from app.answer_sheet_templates.geometry import (
+    bubble_position_px,
+    bubble_radius_px,
+    key_version_bubble_position_px,
+    key_version_bubble_radius_px,
 )
-from app.synthetic_sheets.generator import generate_synthetic_sheet
+from app.main import app
+from app.routers import MAX_UPLOAD_BYTES
+from app.sheet_rendering.renderer import blank_canvas, render_sheet
 from app.synthetic_sheets.mark_drawing import draw_perfect_mark
-from app.synthetic_sheets.question_plan import QuestionMarkKind
 
 try:
     from fastapi.testclient import TestClient
-except RuntimeError:
+except Exception:  # pragma: no cover
 
     @dataclass
     class _Response:
@@ -50,6 +50,7 @@ except RuntimeError:
             path: str,
             *,
             json_body: Any = None,
+            data: dict[str, str] | None = None,
             files: dict[str, tuple[str, bytes, str]] | None = None,
         ) -> _Response:
             headers: list[tuple[bytes, bytes]] = [(b"host", b"testserver")]
@@ -57,10 +58,18 @@ except RuntimeError:
             if json_body is not None:
                 body = json.dumps(json_body).encode("utf-8")
                 headers.append((b"content-type", b"application/json"))
-            elif files is not None:
+            elif files is not None or data is not None:
                 boundary = "----TestClientBoundary7MA4YWxkTrZu0gW"
                 parts: list[bytes] = []
-                for field_name, (filename, file_bytes, content_type) in files.items():
+                for field_name, field_val in (data or {}).items():
+                    parts.append(
+                        f"--{boundary}\r\n"
+                        f'Content-Disposition: form-data; name="{field_name}"\r\n\r\n'
+                        f"{field_val}\r\n".encode("utf-8")
+                    )
+                for field_name, (filename, file_bytes, content_type) in (
+                    files or {}
+                ).items():
                     parts.append(
                         f"--{boundary}\r\n"
                         f'Content-Disposition: form-data; name="{field_name}"; '
@@ -72,7 +81,10 @@ except RuntimeError:
                 parts.append(f"--{boundary}--\r\n".encode("utf-8"))
                 body = b"".join(parts)
                 headers.append(
-                    (b"content-type", f"multipart/form-data; boundary={boundary}".encode("utf-8"))
+                    (
+                        b"content-type",
+                        f"multipart/form-data; boundary={boundary}".encode("utf-8"),
+                    )
                 )
             headers.append((b"content-length", str(len(body)).encode("utf-8")))
 
@@ -87,13 +99,13 @@ except RuntimeError:
                 "raw_path": path_part.encode("utf-8"),
                 "query_string": query_part.encode("utf-8"),
                 "headers": headers,
-                "client": ("127.0.0.1", 50000),
+                "client": ("127.0.0.1", 12345),
                 "server": ("testserver", 80),
             }
+            sent = False
             status_code = 500
             response_headers: dict[str, str] = {}
             chunks: list[bytes] = []
-            sent = False
 
             async def receive() -> dict[str, Any]:
                 nonlocal sent
@@ -115,7 +127,9 @@ except RuntimeError:
 
             anyio.run(self._app, scope, receive, send)
             return _Response(
-                status_code=status_code, content=b"".join(chunks), headers=response_headers
+                status_code=status_code,
+                content=b"".join(chunks),
+                headers=response_headers,
             )
 
         def get(self, path: str) -> _Response:
@@ -126,20 +140,15 @@ except RuntimeError:
             path: str,
             *,
             json: Any = None,
+            data: dict[str, str] | None = None,
             files: dict[str, tuple[str, bytes, str]] | None = None,
         ) -> _Response:
-            return self._request("POST", path, json_body=json, files=files)
+            return self._request(
+                "POST", path, json_body=json, data=data, files=files
+            )
 
-        def patch(self, path: str, *, json: Any = None) -> _Response:
-            return self._request("PATCH", path, json_body=json)
-
-
-@pytest.fixture(autouse=True)
-def isolated_database(tmp_path, monkeypatch):
-    db_path = tmp_path / "test.db"
-    monkeypatch.setenv("AUTOGRADE_DB_PATH", str(db_path))
-    monkeypatch.setenv("AUTOGRADE_DATA_DIR", str(tmp_path))
-    init_db()
+        def put(self, path: str, *, json: Any = None) -> _Response:
+            return self._request("PUT", path, json_body=json)
 
 
 def _encode_png(image) -> bytes:
@@ -148,475 +157,343 @@ def _encode_png(image) -> bytes:
     return buf.tobytes()
 
 
-def test_full_grading_and_review_workflow_over_http():
-    client = TestClient(app)
-    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1)
-
-    test_resp = client.post(
-        "/tests",
-        json={
-            "name": "Midterm",
-            "template_id": TWENTY_QUESTIONS.template_id,
-            "answer_key": sheet.answer_key,
-        },
-    )
-    assert test_resp.status_code == 201
-    test_id = test_resp.json()["id"]
-
-    batch_resp = client.post(f"/tests/{test_id}/batches")
-    assert batch_resp.status_code == 201
-    batch_id = batch_resp.json()["id"]
-
-    blank_png = _encode_png(render_sheet(TWENTY_QUESTIONS, page=PAGE))
-    upload_resp = client.post(
-        f"/batches/{batch_id}/scans",
-        files={"file": ("blank.png", blank_png, "image/png")},
-    )
-    assert upload_resp.status_code == 201
-    scan_job_id = upload_resp.json()["id"]
-
-    grade_resp = client.post(f"/scans/{scan_job_id}/grade")
-    assert grade_resp.status_code == 200
-    graded = grade_resp.json()
-    assert graded["scan_job_id"] == scan_job_id
-    assert graded["needs_review"] is True
-
-    assert client.post(f"/scans/{scan_job_id}/grade").status_code == 409
-
-    results_resp = client.get(f"/batches/{batch_id}/results")
-    assert results_resp.status_code == 200
-    assert [r["id"] for r in results_resp.json()] == [graded["id"]]
-
-    review_resp = client.get("/review-queue")
-    assert review_resp.status_code == 200
-    assert [r["id"] for r in review_resp.json()] == [graded["id"]]
-
-    import csv
-    import io
-
-    csv_resp = client.get(f"/batches/{batch_id}/export.csv")
-    assert csv_resp.status_code == 200
-    rows = list(csv.reader(io.StringIO(csv_resp.text)))
-    assert rows[0] == [
-        "name",
-        "date",
-        "section",
-        "score",
-        "needs_review",
-        *(f"q{i}" for i in range(1, 21)),
-    ]
-    assert rows[1] == [
-        graded["name_text"],
-        graded["date_text"],
-        graded["section_text"],
-        str(graded["score"]),
-        str(graded["needs_review"]),
-        *([""] * 20),
-    ]
-
-
-def test_domain_and_upload_errors_map_to_404_and_422():
+def test_health_and_test_ui_and_templates():
     client = TestClient(app)
 
-    assert (
-        client.post(
-            "/tests",
-            json={"name": "Bad", "template_id": "20q_a4", "answer_key": ["A"]},
-        ).status_code
-        == 422
-    )
-    assert client.post("/tests/999/batches").status_code == 404
-    assert client.get("/batches/999/results").status_code == 404
-    assert client.post("/scans/999/grade").status_code == 404
+    assert client.get("/health").json() == {"status": "ok"}
 
-    test_id = client.post(
-        "/tests",
-        json={"name": "Quiz", "template_id": "20q_a4", "answer_key": ["A"] * 20},
-    ).json()["id"]
-    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
-
-    assert (
-        client.post(
-            f"/batches/{batch_id}/scans",
-            files={"file": ("notes.txt", b"hello", "text/plain")},
-        ).status_code
-        == 422
-    )
-    assert (
-        client.post(
-            f"/batches/{batch_id}/scans",
-            files={"file": ("empty.png", b"", "image/png")},
-        ).status_code
-        == 422
-    )
-
-    unalignable_job_id = client.post(
-        f"/batches/{batch_id}/scans",
-        files={"file": ("white.png", _encode_png(blank_canvas(PAGE)), "image/png")},
-    ).json()["id"]
-    assert client.post(f"/scans/{unalignable_job_id}/grade").status_code == 422
-
-
-def test_batch_results_and_corrections_for_never_graded_vs_failed_regrade():
-    from pathlib import Path
-
-    client = TestClient(app)
-    test_id = client.post(
-        "/tests",
-        json={"name": "Quiz", "template_id": "20q_a4", "answer_key": ["A"] * 20},
-    ).json()["id"]
-    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
-
-    never_graded = client.post(
-        f"/batches/{batch_id}/scans",
-        files={"file": ("white.png", _encode_png(blank_canvas(PAGE)), "image/png")},
-    ).json()
-    assert client.post(f"/scans/{never_graded['id']}/grade").status_code == 422
-    assert (
-        client.patch(
-            f"/scans/{never_graded['id']}/corrections",
-            json={"corrections": {"1": "A"}},
-        ).status_code
-        == 422
-    )
-
-    good_scan = client.post(
-        f"/batches/{batch_id}/scans",
-        files={
-            "file": (
-                "sheet.png",
-                _encode_png(render_sheet(TWENTY_QUESTIONS, page=PAGE)),
-                "image/png",
-            )
-        },
-    ).json()
-    assert client.post(f"/scans/{good_scan['id']}/grade").status_code == 200
-
-    Path(good_scan["raw_image_path"]).unlink()
-    assert client.post(f"/scans/{good_scan['id']}/grade?force=true").status_code == 422
-
-    patch_resp = client.patch(
-        f"/scans/{good_scan['id']}/corrections",
-        json={"corrections": {"1": "A"}},
-    )
-    assert patch_resp.status_code == 200
-    assert patch_resp.json()["score"] == 5.0
-
-    by_job = {
-        r["scan_job_id"]: r for r in client.get(f"/batches/{batch_id}/results").json()
-    }
-    assert by_job[never_graded["id"]]["status"] == "failed"
-    assert by_job[never_graded["id"]]["error_message"] != ""
-
-    assert by_job[good_scan["id"]]["status"] == "failed"
-    assert by_job[good_scan["id"]]["score"] == 5.0
-    assert by_job[good_scan["id"]]["error_message"] != ""
-
-
-def test_patch_identity_and_preserve_hand_edited_identity_on_regrade():
-    client = TestClient(app)
-    test_id = client.post(
-        "/tests",
-        json={"name": "Quiz", "template_id": "20q_a4", "answer_key": ["A"] * 20},
-    ).json()["id"]
-    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
-
-    scan = client.post(
-        f"/batches/{batch_id}/scans",
-        files={
-            "file": (
-                "sheet.png",
-                _encode_png(render_sheet(TWENTY_QUESTIONS, page=PAGE)),
-                "image/png",
-            )
-        },
-    ).json()
-    assert client.post(f"/scans/{scan['id']}/grade").status_code == 200
-
-    identity_resp = client.patch(
-        f"/scans/{scan['id']}/identity",
-        json={"name_text": "Alice Kim", "date_text": "2026-11-09", "section_text": "4A"},
-    )
-    assert identity_resp.status_code == 200
-    assert identity_resp.json()["name_text"] == "Alice Kim"
-    assert identity_resp.json()["date_text"] == "2026-11-09"
-    assert identity_resp.json()["section_text"] == "4A"
-
-    regrade_resp = client.post(f"/scans/{scan['id']}/grade?force=true")
-    assert regrade_resp.status_code == 200
-    regraded = regrade_resp.json()
-    assert regraded["name_text"] == "Alice Kim"
-    assert regraded["date_text"] == "2026-11-09"
-    assert regraded["section_text"] == "4A"
-
-
-def test_marked_sheet_score_and_correction_end_to_end():
-    client = TestClient(app)
-    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=1128)
-
-    test_id = client.post(
-        "/tests",
-        json={
-            "name": "End-to-End Quiz",
-            "template_id": TWENTY_QUESTIONS.template_id,
-            "answer_key": sheet.answer_key,
-        },
-    ).json()["id"]
-    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
-
-    scan_id = client.post(
-        f"/batches/{batch_id}/scans",
-        files={"file": ("marked.png", _encode_png(sheet.image), "image/png")},
-    ).json()["id"]
-    assert client.post(f"/scans/{scan_id}/grade").status_code == 200
-
-    results = client.get(f"/batches/{batch_id}/results").json()
-    assert len(results) == 1
-    result = results[0]
-
-    filled_kinds = {QuestionMarkKind.PERFECT, QuestionMarkKind.OFF_CENTER}
-    expected_correct = sum(
-        1
-        for plan in sheet.question_plans
-        if plan.mark_kind in filled_kinds
-        and plan.marked_choices == (plan.correct_choice,)
-    )
-    expected_score = (expected_correct / len(sheet.question_plans)) * 100.0
-    assert result["score"] == expected_score
-    assert result["needs_review"] is True
-
-    answers = json.loads(result["answers_json"])
-    for plan in sheet.question_plans:
-        if plan.mark_kind == QuestionMarkKind.PERFECT:
-            assert answers[plan.question_number - 1] == plan.marked_choices[0]
-
-    flags = json.loads(result["flags_json"])
-    flagged_questions = flags["ambiguous"] + flags["multiple"]
-    assert len(flagged_questions) == 1
-    flagged_q = flagged_questions[0]
-
-    patch_resp = client.patch(
-        f"/scans/{scan_id}/corrections",
-        json={"corrections": {str(flagged_q): sheet.answer_key[flagged_q - 1]}},
-    )
-    assert patch_resp.status_code == 200
-    updated = patch_resp.json()
-    assert updated["score"] == ((expected_correct + 1) / len(sheet.question_plans)) * 100.0
-    assert updated["needs_review"] is False
-
-
-def test_ungraded_scan_appears_pending_and_csv_escapes_formulas():
-    import csv
-    import io
-
-    client = TestClient(app)
-    test_id = client.post(
-        "/tests",
-        json={"name": "Quiz", "template_id": "20q_a4", "answer_key": ["A"] * 20},
-    ).json()["id"]
-    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
-
-    ungraded = client.post(
-        f"/batches/{batch_id}/scans",
-        files={
-            "file": (
-                "sheet.png",
-                _encode_png(render_sheet(TWENTY_QUESTIONS, page=PAGE)),
-                "image/png",
-            )
-        },
-    ).json()
-
-    results = client.get(f"/batches/{batch_id}/results").json()
-    assert len(results) == 1
-    assert results[0]["scan_job_id"] == ungraded["id"]
-    assert results[0]["status"] == "pending"
-    assert results[0]["score"] == 0.0
-    assert results[0]["answers_json"] == "[]"
-
-    assert client.post(f"/scans/{ungraded['id']}/grade").status_code == 200
-    assert (
-        client.patch(
-            f"/scans/{ungraded['id']}/identity",
-            json={"name_text": "=1+1"},
-        ).status_code
-        == 200
-    )
-
-    rows = list(csv.reader(io.StringIO(client.get(f"/batches/{batch_id}/export.csv").text)))
-    assert rows[1][0] == "'=1+1"
-
-
-def test_trace_ambiguous_flows_through_scoring_review_corrections_and_csv():
-    import csv
-    import io
-
-    client = TestClient(app)
-    answer_key = ["A", "B"] + ["C"] * 18
-    canvas = render_sheet(TWENTY_QUESTIONS, page=PAGE)
-    radius_px = bubble_radius_px(TWENTY_QUESTIONS, PAGE)
-    # Q1: faint trace on the correct letter "A"; Q2: solid mark on the correct letter "B".
-    cv2.circle(
-        canvas,
-        bubble_position_px(TWENTY_QUESTIONS, 1, 0, PAGE),
-        radius_px,
-        (180, 180, 180),
-        -1,
-    )
-    draw_perfect_mark(canvas, bubble_position_px(TWENTY_QUESTIONS, 2, 1, PAGE), radius_px)
-
-    summary = score_sheet(classify_sheet(canvas, TWENTY_QUESTIONS, PAGE), answer_key)
-    assert summary.question_outcomes[1] == QuestionOutcome.AMBIGUOUS
-    assert summary.correct_count == 1
-    assert summary.wrong_count == 0
-    assert summary.ambiguous_count == 1
-
-    test_id = client.post(
-        "/tests",
-        json={"name": "Trace Quiz", "template_id": "20q_a4", "answer_key": answer_key},
-    ).json()["id"]
-    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
-    scan_id = client.post(
-        f"/batches/{batch_id}/scans",
-        files={"file": ("trace.png", _encode_png(canvas), "image/png")},
-    ).json()["id"]
-
-    graded = client.post(f"/scans/{scan_id}/grade").json()
-    assert graded["score"] == 5.0
-    assert graded["needs_review"] is True
-    assert json.loads(graded["answers_json"])[:3] == ["A", "B", ""]
-    assert json.loads(graded["flags_json"]) == {"ambiguous": [1], "multiple": []}
-
-    rows_before = list(csv.reader(io.StringIO(client.get(f"/batches/{batch_id}/export.csv").text)))
-    assert rows_before[1][3:8] == ["5.0", "True", "A", "B", ""]
-
-    updated = client.patch(
-        f"/scans/{scan_id}/corrections",
-        json={"corrections": {"1": "A"}},
-    ).json()
-    assert updated["score"] == 10.0
-    assert updated["needs_review"] is False
-
-    rows_after = list(csv.reader(io.StringIO(client.get(f"/batches/{batch_id}/export.csv").text)))
-    assert rows_after[1][3:8] == ["10.0", "False", "A", "B", ""]
-
-
-def test_get_scan_image_unknown_scan_returns_404():
-    client = TestClient(app)
-    assert client.get("/scans/999999/image").status_code == 404
-
-
-def test_get_scan_image_graded_scan_returns_processed_image_bytes():
-    from pathlib import Path
-
-    client = TestClient(app)
-    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=0)
-    test_id = client.post(
-        "/tests",
-        json={"name": "Img Quiz", "template_id": "20q_a4", "answer_key": sheet.answer_key},
-    ).json()["id"]
-    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
-    scan_id = client.post(
-        f"/batches/{batch_id}/scans",
-        files={"file": ("sheet.png", _encode_png(sheet.image), "image/png")},
-    ).json()["id"]
-
-    graded = client.post(f"/scans/{scan_id}/grade").json()
-    processed_bytes = Path(graded["processed_image_path"]).read_bytes()
-
-    response = client.get(f"/scans/{scan_id}/image")
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("image/")
-    assert response.content == processed_bytes
-
-
-def test_get_scan_image_deleted_files_returns_404():
-    from pathlib import Path
-
-    client = TestClient(app)
-    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=0)
-    test_id = client.post(
-        "/tests",
-        json={"name": "Img Quiz", "template_id": "20q_a4", "answer_key": sheet.answer_key},
-    ).json()["id"]
-    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
-    scan = client.post(
-        f"/batches/{batch_id}/scans",
-        files={"file": ("sheet.png", _encode_png(sheet.image), "image/png")},
-    ).json()
-    graded = client.post(f"/scans/{scan['id']}/grade").json()
-
-    Path(graded["processed_image_path"]).unlink()
-    Path(scan["raw_image_path"]).unlink()
-
-    assert client.get(f"/scans/{scan['id']}/image").status_code == 404
-
-
-def test_get_scan_image_outside_data_dir_returns_404(tmp_path):
-    from app.db import repositories
-    from app.db.records import NewScanJob
-
-    client = TestClient(app)
-    sheet = generate_synthetic_sheet(TWENTY_QUESTIONS, seed=0)
-    test_id = client.post(
-        "/tests",
-        json={"name": "Outside Quiz", "template_id": "20q_a4", "answer_key": sheet.answer_key},
-    ).json()["id"]
-    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
-
-    outside_file = tmp_path.parent / f"{tmp_path.name}_outside.png"
-    outside_file.write_bytes(_encode_png(sheet.image))
-    try:
-        outside_job = repositories.create_scan_job(
-            NewScanJob(batch_id=batch_id, raw_image_path=str(outside_file))
-        )
-        assert client.get(f"/scans/{outside_job.id}/image").status_code == 404
-    finally:
-        outside_file.unlink(missing_ok=True)
-
-
-def test_backend_test_ui_serves_html() -> None:
-    client = TestClient(app)
     root_resp = client.get("/")
     assert root_resp.status_code == 307
     assert root_resp.headers.get("location") == "/test-ui"
 
-    fav_resp = client.get("/favicon.ico")
-    assert fav_resp.status_code == 204
+    assert client.get("/favicon.ico").status_code == 204
 
-    response = client.get("/test-ui")
-    assert response.status_code == 200
-    assert response.headers.get("content-type", "").startswith("text/html")
-    assert "AutoGradeQuiz Backend Sandbox" in response.text
+    ui_resp = client.get("/test-ui")
+    assert ui_resp.status_code == 200
+    assert "AutoGradeQuiz Backend Sandbox" in ui_resp.text
+
+    templates_resp = client.get("/templates")
+    assert templates_resp.status_code == 200
+    assert templates_resp.json() == [
+        {"template_id": "20q_a4", "question_count": 20},
+        {"template_id": "50q_a4", "question_count": 50},
+        {"template_id": "100q_a4", "question_count": 100},
+    ]
 
 
-def test_test_ui_synthetic_sheet_download_and_grade(isolated_database: Any) -> None:
+def test_scan_key_and_synthetic_sheet_endpoints():
     client = TestClient(app)
 
-    png_resp = client.get("/test-ui/synthetic-sheet?template_id=20q_a4&seed=0")
-    assert png_resp.status_code == 200
-    assert png_resp.headers.get("content-type") == "image/png"
-    assert png_resp.content.startswith(b"\x89PNG")
+    canvas = render_sheet(TWENTY_QUESTIONS, page=PAGE)
+    radius_px = bubble_radius_px(TWENTY_QUESTIONS, PAGE)
+    for q in range(1, 21):
+        draw_perfect_mark(
+            canvas, bubble_position_px(TWENTY_QUESTIONS, q, 0, PAGE), radius_px
+        )
 
-    test_id = client.post(
-        "/tests",
-        json={"name": "Sandbox Quiz", "template_id": "20q_a4", "answer_key": ["A"] * 20},
-    ).json()["id"]
-    batch_id = client.post(f"/tests/{test_id}/batches").json()["id"]
-
-    gen_resp = client.post(
-        f"/test-ui/batches/{batch_id}/synthetic-scans",
-        json={"seed": 0, "grade": True},
+    key_resp = client.post(
+        "/tests/scan-key?template_id=20q_a4",
+        files={"file": ("key.png", _encode_png(canvas), "image/png")},
     )
-    assert gen_resp.status_code == 200
-    payload = gen_resp.json()
-    assert payload["seed"] == 0
-    assert len(payload["marked_choices"]) == 20
-    assert payload["result"]["status"] == "done"
-    assert payload["result"]["scan_job_id"] == payload["scan_job_id"]
+    assert key_resp.status_code == 200
+    assert key_resp.json()["answer_key"] == ["A"] * 20
+    assert key_resp.json()["flagged_questions"] == []
+
+    synth = client.post(
+        "/test-ui/synthetic-sheet", json={"template_id": "20q_a4", "seed": 2}
+    )
+    assert synth.status_code == 200
+    synth_body = synth.json()
+    assert len(synth_body["answer_key"]) == 20
+    assert "png_base64" not in synth_body
+    synth_jpeg = base64.b64decode(synth_body["jpeg_base64"])
+    assert synth_jpeg[:2] == b"\xff\xd8"
+    assert len(synth_jpeg) < 2_000_000
+
+    synth_with_png = client.post(
+        "/test-ui/synthetic-sheet",
+        json={"template_id": "20q_a4", "seed": 2, "include_png": True},
+    )
+    assert synth_with_png.status_code == 200
+    assert base64.b64decode(synth_with_png.json()["png_base64"])[:4] == b"\x89PNG"
+
+    bad_kv = client.post(
+        "/test-ui/synthetic-sheet",
+        json={"template_id": "20q_a4", "seed": 2, "key_version": "Z"},
+    )
+    assert bad_kv.status_code == 422
 
 
+def test_stateless_grade_synthetic_sheet_and_4xx_validation():
+    client = TestClient(app)
+
+    canvas = render_sheet(TWENTY_QUESTIONS, page=PAGE)
+    radius_px = bubble_radius_px(TWENTY_QUESTIONS, PAGE)
+    for q in range(1, 21):
+        choice_idx = 0 if q <= 10 else 1
+        pos = bubble_position_px(TWENTY_QUESTIONS, q, choice_idx, PAGE)
+        draw_perfect_mark(canvas, pos, radius_px)
+
+    key_payload = {
+        "answer_key": ["A"] * 10 + ["C"] * 10,
+        "points": [2.0] * 10 + [1.0] * 10,
+    }
+    resp = client.post(
+        "/grade",
+        data={
+            "template_id": "20q_a4",
+            "answer_key": json.dumps(key_payload),
+            "include_graded_image": "true",
+        },
+        files={"file": ("sheet.png", _encode_png(canvas), "image/png")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answers"] == ["A"] * 10 + ["B"] * 10
+    assert body["flags"] == {}
+    assert len(body["confidence"]) == 20
+    assert body["score"] == pytest.approx((20.0 / 30.0) * 100.0)
+    assert body["needs_review"] is False
+    jpeg_bytes = base64.b64decode(body["aligned_image_jpeg_base64"])
+    assert jpeg_bytes[:2] == b"\xff\xd8"
+    graded_jpeg_bytes = base64.b64decode(body["graded_image_jpeg_base64"])
+    assert graded_jpeg_bytes[:2] == b"\xff\xd8"
+    assert body["workspace_paths"] is None
+
+    # Default /grade (without include_graded_image) omits graded_image_jpeg_base64
+    resp_default = client.post(
+        "/grade",
+        data={"template_id": "20q_a4", "answer_key": json.dumps(key_payload)},
+        files={"file": ("sheet.png", _encode_png(canvas), "image/png")},
+    )
+    assert resp_default.status_code == 200
+    assert resp_default.json()["graded_image_jpeg_base64"] == ""
+
+    valid_img = _encode_png(canvas)
+    valid_key = json.dumps({"answer_key": ["A"] * 20, "points": [1.0] * 20})
+
+    # 1. Non-image file or corrupt image bytes
+    assert (
+        client.post(
+            "/grade",
+            data={"template_id": "20q_a4", "answer_key": valid_key},
+            files={"file": ("notes.txt", b"not an image", "text/plain")},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/grade",
+            data={"template_id": "20q_a4", "answer_key": valid_key},
+            files={"file": ("corrupt.png", b"bad-bytes", "image/png")},
+        ).status_code
+        == 422
+    )
+    # Missing fiducials -> 422
+    assert (
+        client.post(
+            "/grade",
+            data={"template_id": "20q_a4", "answer_key": valid_key},
+            files={"file": ("blank.png", _encode_png(blank_canvas(PAGE)), "image/png")},
+        ).status_code
+        == 422
+    )
+
+    # 2. Unknown template_id -> 422
+    assert (
+        client.post(
+            "/grade",
+            data={"template_id": "unknown_template", "answer_key": valid_key},
+            files={"file": ("sheet.png", valid_img, "image/png")},
+        ).status_code
+        == 422
+    )
+
+    # 3. Malformed keys or wrong length -> 422
+    for bad_key in [
+        "{not-json",
+        json.dumps(["A"] * 20),
+        json.dumps({"answers": ["A"] * 20}),
+        json.dumps({"answer_key": ["Z"] * 20}),
+        json.dumps({"answer_key": ["A"] * 5}),
+    ]:
+        assert (
+            client.post(
+                "/grade",
+                data={"template_id": "20q_a4", "answer_key": bad_key},
+                files={"file": ("sheet.png", valid_img, "image/png")},
+            ).status_code
+            == 422
+        )
+
+    # 4. Image exceeding 10 MB limit -> 422
+    oversized = b"\x89PNG\r\n\x1a\n" + b"0" * MAX_UPLOAD_BYTES
+    assert (
+        client.post(
+            "/grade",
+            data={"template_id": "20q_a4", "answer_key": valid_key},
+            files={"file": ("huge.png", oversized, "image/png")},
+        ).status_code
+        == 422
+    )
 
 
+def test_workspace_endpoints_and_grade_save(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ws_dir = tmp_path / "workspace"
+    monkeypatch.setenv("AUTOGRADE_WORKSPACE_DIR", str(ws_dir))
+    client = TestClient(app)
+
+    status_resp = client.get("/workspace/status")
+    assert status_resp.status_code == 200
+    status_body = status_resp.json()
+    assert status_body["has_workspace_json"] is False
+    assert status_body["template_files"] == ["100q_a4.pdf", "20q_a4.pdf", "50q_a4.pdf"]
+
+    assert client.get("/workspace/data").status_code == 404
+
+    payload = {
+        "exportVersion": 1,
+        "quizzes": [],
+        "batches": [],
+        "papers": [],
+        "sections": [],
+        "students": [],
+    }
+    put_resp = client.put("/workspace/data", json=payload)
+    assert put_resp.status_code == 200
+    assert put_resp.json()["ok"] is True
+
+    get_resp = client.get("/workspace/data")
+    assert get_resp.status_code == 200
+    assert get_resp.json() == payload
+
+    assert client.put("/workspace/data", json={"quizzes": []}).status_code == 422
+
+    pdf_resp = client.get("/workspace/templates/20q_a4")
+    assert pdf_resp.status_code == 200
+    assert pdf_resp.content[:4] == b"%PDF"
+
+    assert client.get("/workspace/templates/unknown").status_code == 422
+
+    canvas = render_sheet(TWENTY_QUESTIONS, page=PAGE)
+    radius_px = bubble_radius_px(TWENTY_QUESTIONS, PAGE)
+    for q in range(1, 21):
+        draw_perfect_mark(canvas, bubble_position_px(TWENTY_QUESTIONS, q, 0, PAGE), radius_px)
+
+    grade_resp = client.post(
+        "/grade",
+        data={
+            "template_id": "20q_a4",
+            "answer_key": json.dumps({"answer_key": ["A"] * 20}),
+            "save_to_workspace": "true",
+            "quiz_id": "quiz-123456",
+            "quiz_name": "Midterm Quiz",
+            "paper_id": "paper-abcdef",
+        },
+        files={"file": ("sheet.png", _encode_png(canvas), "image/png")},
+    )
+    assert grade_resp.status_code == 200
+    ws_paths = grade_resp.json()["workspace_paths"]
+    assert ws_paths is not None
+    assert (ws_dir / ws_paths["raw"]).is_file()
+    assert (ws_dir / ws_paths["aligned"]).is_file()
+    assert (ws_dir / ws_paths["graded"]).is_file()
+    assert client.get("/workspace/status").json()["scan_count"] == 1
+
+    # Syncing workspace.json without that paper prunes orphaned scan artifacts on disk
+    assert client.put("/workspace/data", json=payload).status_code == 200
+    assert not (ws_dir / ws_paths["raw"]).exists()
+    assert client.get("/workspace/status").json()["scan_count"] == 0
 
 
+def test_grade_endpoint_key_version_and_partial_credit():
+    client = TestClient(app)
+
+    canvas = render_sheet(TWENTY_QUESTIONS, page=PAGE)
+    r_px = bubble_radius_px(TWENTY_QUESTIONS, PAGE)
+    # Mark Key Version B and answer all 20 questions with C (except Q1 marked E)
+    draw_perfect_mark(
+        canvas,
+        key_version_bubble_position_px(1, PAGE),
+        key_version_bubble_radius_px(PAGE),
+    )
+    draw_perfect_mark(canvas, bubble_position_px(TWENTY_QUESTIONS, 1, 4, PAGE), r_px)
+    for q in range(2, 21):
+        draw_perfect_mark(canvas, bubble_position_px(TWENTY_QUESTIONS, q, 2, PAGE), r_px)
+
+    rules_b = [
+        {"alternate_answers": [{"choice": "E", "points": 0.5}], "incorrect_points": -0.25}
+        if q == 1
+        else {"alternate_answers": [], "incorrect_points": 0.0}
+        for q in range(1, 21)
+    ]
+    payload = {
+        "answer_key": ["A"] * 20,
+        "points": [1.0] * 20,
+        "key_versions": {
+            "B": {
+                "answer_key": ["C"] * 20,
+                "points": [1.0] * 20,
+                "question_rules": rules_b,
+            }
+        },
+    }
+    resp = client.post(
+        "/grade",
+        data={"template_id": "20q_a4", "answer_key": json.dumps(payload)},
+        files={"file": ("kv_b.png", _encode_png(canvas), "image/png")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["key_version"] == "B"
+    assert body["key_version_detected"] == "B"
+    assert body["key_version_flagged"] is False
+    # 19 full credit (19.0) + Q1 alternate E (0.5) = 19.5 / 20.0 = 97.5%
+    assert body["score"] == pytest.approx(97.5)
+
+    # Tiny 2x2 PNG -> 422, not 500
+    tiny = canvas[:2, :2].copy()
+    assert (
+        client.post(
+            "/grade",
+            data={"template_id": "20q_a4", "answer_key": json.dumps({"answer_key": ["A"] * 20})},
+            files={"file": ("tiny.png", _encode_png(tiny), "image/png")},
+        ).status_code
+        == 422
+    )
+
+    # NaN / Infinity constants -> 422, not 500
+    assert (
+        client.post(
+            "/grade",
+            data={
+                "template_id": "20q_a4",
+                "answer_key": '{"answer_key": ["A",' + ",".join(['"A"'] * 19) + '],"points": ['
+                + ",".join(["NaN"] * 20)
+                + "]}",
+            },
+            files={"file": ("kv_b.png", _encode_png(canvas), "image/png")},
+        ).status_code
+        == 422
+    )
+
+    # Marking undefined Key Version C on an A+B quiz flags the paper for review
+    canvas_c = render_sheet(TWENTY_QUESTIONS, page=PAGE)
+    draw_perfect_mark(
+        canvas_c,
+        key_version_bubble_position_px(2, PAGE),
+        key_version_bubble_radius_px(PAGE),
+    )
+    for q in range(1, 21):
+        draw_perfect_mark(canvas_c, bubble_position_px(TWENTY_QUESTIONS, q, 0, PAGE), r_px)
+    resp_c = client.post(
+        "/grade",
+        data={"template_id": "20q_a4", "answer_key": json.dumps(payload)},
+        files={"file": ("kv_c.png", _encode_png(canvas_c), "image/png")},
+    )
+    assert resp_c.status_code == 200
+    body_c = resp_c.json()
+    assert body_c["key_version_detected"] == "C"
+    assert body_c["key_version"] == "A"
+    assert body_c["key_version_flagged"] is True
+    assert body_c["needs_review"] is True

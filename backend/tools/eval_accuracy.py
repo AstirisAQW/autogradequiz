@@ -17,7 +17,6 @@ import numpy as np
 
 from app.answer_sheet_templates.catalog import get_template_spec, list_template_specs
 from app.bubble_grading.classifier import BubbleResult, QuestionFill, classify_sheet
-from app.bubble_grading.scoring import score_sheet
 from app.scan_alignment.align_scan import ScanAlignmentError, align_scan
 from app.synthetic_sheets.generator import generate_synthetic_sheet
 from app.synthetic_sheets.question_plan import QuestionPlan, generate_answer_key
@@ -88,7 +87,6 @@ def evaluate_accuracy(
                 continue
 
             fills = classify_sheet(aligned, spec)
-            score_sheet(fills, answer_key)
 
             for plan, mark_type in zip(sheet.question_plans, sheet.mark_types):
                 fill = fills[plan.question_number]
