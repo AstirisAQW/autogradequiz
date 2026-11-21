@@ -103,7 +103,7 @@ def inspect_corners(
     report: dict[str, str] = {}
     for name, x0, y0, x1, y1, corner_x, corner_y in windows:
         sub = gray[y0:y1, x0:x1]
-        if int(sub.max()) - int(sub.min()) < 40:
+        if sub.size == 0 or int(sub.max()) - int(sub.min()) < 40:
             counts.append(0)
             report[name] = "rejected(low_contrast)"
             continue
