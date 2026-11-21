@@ -1,7 +1,7 @@
-from contextlib import asynccontextmanager
+from __future__ import annotations
+
+import base64
 from pathlib import Path
-from typing import AsyncIterator
-from uuid import uuid4
 
 import cv2
 from fastapi import FastAPI, Request, Response
@@ -11,59 +11,24 @@ from pydantic import BaseModel
 
 from app.answer_sheet_templates.catalog import get_template_spec
 from app.answer_sheet_templates.exceptions import UnknownTemplateError
-from app.config import get_settings
-from app.db import repositories
-from app.db.connection import init_db
-from app.db.exceptions import (
-    BatchNotFoundError,
-    InvalidCorrectionError,
-    InvalidTestError,
-    ScanJobNotFoundError,
-    ScanResultNotFoundError,
-    TestNotFoundError,
-)
-from app.db.records import NewScanJob
-from app.grading_pipeline.exceptions import (
-    ScanImageUnreadableError,
-    ScanJobAlreadyGradedError,
-)
-from app.grading_pipeline.grade_scan_job import grade_scan_job
-from app.routers import batches_router, review_router, scans_router, tests_router
+from app.answer_sheet_templates.geometry import KEY_VERSION_CHOICES
+from app.grading_pipeline.exceptions import InvalidAnswerKeyError, ScanImageUnreadableError
+from app.routers import stateless_router
 from app.scan_alignment.align_scan import ScanAlignmentError
 from app.synthetic_sheets.generator import generate_synthetic_sheet
+from app.workspace_router import workspace_router
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    init_db()
-    yield
-
-
-app = FastAPI(title="AutoGradeQuiz Backend", lifespan=lifespan)
+app = FastAPI(title="AutoGradeQuiz Stateless Grader")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "tauri://localhost"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-@app.exception_handler(TestNotFoundError)
-@app.exception_handler(BatchNotFoundError)
-@app.exception_handler(ScanJobNotFoundError)
-@app.exception_handler(ScanResultNotFoundError)
-def handle_not_found(_request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(status_code=404, content={"detail": str(exc)})
-
-
-@app.exception_handler(ScanJobAlreadyGradedError)
-def handle_conflict(_request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(status_code=409, content={"detail": str(exc)})
-
-
-@app.exception_handler(InvalidTestError)
-@app.exception_handler(InvalidCorrectionError)
+@app.exception_handler(InvalidAnswerKeyError)
 @app.exception_handler(UnknownTemplateError)
 @app.exception_handler(ScanImageUnreadableError)
 @app.exception_handler(ScanAlignmentError)
@@ -71,10 +36,8 @@ def handle_unprocessable(_request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
-app.include_router(tests_router)
-app.include_router(batches_router)
-app.include_router(scans_router)
-app.include_router(review_router)
+app.include_router(stateless_router)
+app.include_router(workspace_router)
 
 
 @app.get("/", include_in_schema=False)
@@ -88,64 +51,67 @@ def favicon() -> Response:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-class SyntheticScanRequest(BaseModel):
+TEST_UI_HTML_PATH = Path(__file__).with_name("test_ui.html")
+
+
+@app.get("/test-ui", response_class=HTMLResponse, include_in_schema=False)
+def backend_test_ui() -> HTMLResponse:
+    return HTMLResponse(content=TEST_UI_HTML_PATH.read_text(encoding="utf-8"))
+
+
+class SyntheticSheetRequest(BaseModel):
+    template_id: str = "20q_a4"
     seed: int = 0
-    grade: bool = True
+    name_text: str = "Dela Cruz, Juan"
+    student_id_text: str = "0123456789"
+    section_text: str = "10-Rizal"
+    date_text: str = "2026-11-18"
+    key_version: str = ""
+    include_png: bool = False
 
 
-@app.get("/test-ui", include_in_schema=False)
-def test_ui() -> HTMLResponse:
-    return HTMLResponse(Path(__file__).with_name("test_ui.html").read_text(encoding="utf-8"))
-
-
-@app.get("/test-ui/synthetic-sheet", include_in_schema=False)
-def download_synthetic_sheet(template_id: str = "20q_a4", seed: int = 0) -> Response:
-    spec = get_template_spec(template_id)
-    sheet = generate_synthetic_sheet(spec, seed)
-    ok, buf = cv2.imencode(".png", sheet.image)
-    if not ok:
-        raise RuntimeError("Failed to encode synthetic sheet PNG.")
-    filename = f"{template_id}_seed_{seed:04d}.png"
-    return Response(
-        content=buf.tobytes(),
-        media_type="image/png",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@app.post("/test-ui/batches/{batch_id}/synthetic-scans", include_in_schema=False)
-def create_synthetic_scan(batch_id: int, payload: SyntheticScanRequest) -> dict[str, object]:
-    batch = repositories.get_batch(batch_id)
-    test = repositories.get_test(batch.test_id)
-    spec = get_template_spec(test.template_id)
-    sheet = generate_synthetic_sheet(spec, payload.seed, answer_key=test.answer_key)
-
-    ok, buf = cv2.imencode(".png", sheet.image)
-    if not ok:
-        raise RuntimeError("Failed to encode synthetic sheet PNG.")
-
-    raw_dir = Path(get_settings().autograde_data_dir) / "raw"
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    raw_path = raw_dir / f"batch_{batch_id}_{uuid4().hex}.png"
-    raw_path.write_bytes(buf.tobytes())
-
-    job = repositories.create_scan_job(NewScanJob(batch_id=batch_id, raw_image_path=str(raw_path)))
-    result = grade_scan_job(job.id) if payload.grade else None
-    return {
-        "scan_job_id": job.id,
-        "seed": payload.seed,
-        "marked_choices": ["".join(plan.marked_choices) for plan in sheet.question_plans],
-        "ground_truth": [
-            {
-                "question_number": plan.question_number,
-                "marked_choices": list(plan.marked_choices),
-                "mark_type": mark_type,
-            }
-            for plan, mark_type in zip(sheet.question_plans, sheet.mark_types)
-        ],
-        "result": result,
+@app.post("/test-ui/synthetic-sheet", include_in_schema=False)
+def create_synthetic_sheet_endpoint(payload: SyntheticSheetRequest) -> dict[str, object]:
+    """Generate a synthetic answer sheet JPEG (and optional PNG) for the /test-ui sandbox."""
+    spec = get_template_spec(payload.template_id)
+    raw_kv = (payload.key_version or "").strip().upper()
+    if raw_kv and raw_kv not in KEY_VERSION_CHOICES:
+        raise InvalidAnswerKeyError(f"Unknown key version '{payload.key_version}'.")
+    header_values = {
+        "name": payload.name_text,
+        "student_id": payload.student_id_text,
+        "section": payload.section_text,
+        "date": payload.date_text,
     }
+    sheet = generate_synthetic_sheet(
+        spec,
+        payload.seed,
+        header_values=header_values,
+        key_version=raw_kv,
+    )
+    ok_jpg, jpg_buf = cv2.imencode(".jpg", sheet.image, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ok_jpg:
+        raise RuntimeError("Failed to encode synthetic sheet JPEG.")
+
+    response: dict[str, object] = {
+        "template_id": spec.template_id,
+        "seed": payload.seed,
+        "key_version": raw_kv or "A",
+        "name_text": payload.name_text,
+        "student_id_text": payload.student_id_text,
+        "section_text": payload.section_text,
+        "date_text": payload.date_text,
+        "answer_key": sheet.answer_key,
+        "marked_choices": ["".join(plan.marked_choices) for plan in sheet.question_plans],
+        "jpeg_base64": base64.b64encode(jpg_buf.tobytes()).decode("ascii"),
+    }
+    if payload.include_png:
+        ok_png, png_buf = cv2.imencode(".png", sheet.image)
+        if not ok_png:
+            raise RuntimeError("Failed to encode synthetic sheet PNG.")
+        response["png_base64"] = base64.b64encode(png_buf.tobytes()).decode("ascii")
+    return response
