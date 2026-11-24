@@ -1,4 +1,8 @@
-import { evaluateQuestionScore, resolveEffectiveChoice } from "./scoring.ts";
+import {
+  evaluateQuestionScore,
+  rescore,
+  resolveEffectiveChoice,
+} from "./scoring.ts";
 import { ANSWER_CHOICES } from "./types.ts";
 import {
   getAvailableKeyVersions,
@@ -23,7 +27,9 @@ export interface QuestionItemAnalysis {
   correctCount: number;
   correctPct: number;
   flaggedCount: number;
+  discriminationIndex: number | null;
   choiceCounts: ChoiceDistribution;
+  wrongChoiceCounts?: ChoiceDistribution;
 }
 
 export interface QuizItemAnalysis {
@@ -64,7 +70,7 @@ export function computeItemAnalysis(
 
   const questionCount = quiz.answerKey.length;
   const gradedPapers = papers.filter((p) => {
-    if (p.status !== "done" || p.answers.length !== questionCount) {
+    if (p.answers.length !== questionCount) {
       return false;
     }
     if (options?.keyVersion) {
@@ -73,6 +79,33 @@ export function computeItemAnalysis(
     return true;
   });
   const gradedPaperCount = gradedPapers.length;
+  const k =
+    gradedPaperCount >= 4
+      ? Math.min(
+          Math.floor(gradedPaperCount / 2),
+          Math.max(2, Math.floor(gradedPaperCount * 0.27)),
+        )
+      : 0;
+  const rankedPapers =
+    k > 0
+      ? gradedPapers
+          .map((paper, idx) => {
+            const resolved =
+              versionData ?? resolveQuizKeyForVersion(quiz, paper.keyVersion);
+            const totalScore = rescore({
+              answerKey: resolved.answerKey,
+              points: resolved.points,
+              questionRules: resolved.questionRules,
+              answers: paper.answers,
+              flags: paper.flags,
+              corrections: paper.corrections,
+            }).score;
+            return { idx, totalScore };
+          })
+          .sort((a, b) => b.totalScore - a.totalScore)
+      : [];
+  const topGroup = k > 0 ? rankedPapers.slice(0, k) : [];
+  const bottomGroup = k > 0 ? rankedPapers.slice(-k) : [];
 
   const questions: QuestionItemAnalysis[] = [];
 
@@ -93,11 +126,14 @@ export function computeItemAnalysis(
     const basePoints = versionData?.points ?? quiz.points;
     const pointsWeight = basePoints ? Number(basePoints[qNum - 1] ?? 1) : 1;
     const choiceCounts = emptyDistribution();
+    const wrongChoiceCounts = emptyDistribution();
     let correctCount = 0;
     let creditRatioSum = 0;
     let flaggedCount = 0;
+    const correctIndices = new Set<number>();
 
-    for (const paper of gradedPapers) {
+    for (let pIdx = 0; pIdx < gradedPapers.length; pIdx += 1) {
+      const paper = gradedPapers[pIdx];
       const resolved =
         versionData ?? resolveQuizKeyForVersion(quiz, paper.keyVersion);
       const { choice: effectiveChoice, isUnresolvedFlag } =
@@ -110,7 +146,9 @@ export function computeItemAnalysis(
 
       if (isUnresolvedFlag) {
         flaggedCount += 1;
-        recordChoiceBucket(choiceCounts, paper.answers[qNum - 1] ?? "");
+        const flaggedRaw = paper.answers[qNum - 1] ?? "";
+        recordChoiceBucket(choiceCounts, flaggedRaw);
+        recordChoiceBucket(wrongChoiceCounts, flaggedRaw);
         continue;
       }
 
@@ -127,8 +165,12 @@ export function computeItemAnalysis(
       if (evalRes.status === "correct") {
         correctCount += 1;
         creditRatioSum += 1;
-      } else if (evalRes.status === "partial" && evalRes.max > 0) {
-        creditRatioSum += Math.max(0, evalRes.earned / evalRes.max);
+        correctIndices.add(pIdx);
+      } else {
+        recordChoiceBucket(wrongChoiceCounts, effectiveChoice);
+        if (evalRes.status === "partial" && evalRes.max > 0) {
+          creditRatioSum += Math.max(0, evalRes.earned / evalRes.max);
+        }
       }
     }
 
@@ -137,6 +179,19 @@ export function computeItemAnalysis(
         ? Math.round((creditRatioSum / gradedPaperCount) * 1000) / 10
         : 0;
 
+    let discriminationIndex: number | null = null;
+    if (k > 0) {
+      const topCorrect = topGroup.filter((e) =>
+        correctIndices.has(e.idx),
+      ).length;
+      const bottomCorrect = bottomGroup.filter((e) =>
+        correctIndices.has(e.idx),
+      ).length;
+      discriminationIndex = Number(
+        ((topCorrect - bottomCorrect) / k).toFixed(2),
+      );
+    }
+
     questions.push({
       questionNumber: qNum,
       correctKey,
@@ -144,7 +199,9 @@ export function computeItemAnalysis(
       correctCount,
       correctPct,
       flaggedCount,
+      discriminationIndex,
       choiceCounts,
+      wrongChoiceCounts,
     });
   }
 
@@ -169,4 +226,79 @@ export function computeItemAnalysis(
     hardestQuestion,
     easiestQuestion,
   };
+}
+
+export function summarizeQuestionResponse(
+  item: QuestionItemAnalysis,
+  totalPapers: number,
+): string {
+  if (totalPapers <= 0) return "—";
+  if (item.correctCount >= totalPapers && item.correctPct >= 100) {
+    return "All correct";
+  }
+  if (!item.wrongChoiceCounts && item.correctKey === "Per key") {
+    return "Select a key version to see patterns";
+  }
+
+  const allBuckets: Array<{
+    key: keyof ChoiceDistribution;
+    count: number;
+  }> = [
+    { key: "A", count: item.choiceCounts.A },
+    { key: "B", count: item.choiceCounts.B },
+    { key: "C", count: item.choiceCounts.C },
+    { key: "D", count: item.choiceCounts.D },
+    { key: "E", count: item.choiceCounts.E },
+    { key: "Blank", count: item.choiceCounts.Blank },
+    { key: "Multiple", count: item.choiceCounts.Multiple },
+  ];
+
+  let topCount = 0;
+  for (const b of allBuckets) {
+    if (b.count > topCount) topCount = b.count;
+  }
+
+  const wrongSource = item.wrongChoiceCounts ?? item.choiceCounts;
+  const wrongBuckets: Array<{
+    key: keyof ChoiceDistribution;
+    count: number;
+  }> = [
+    { key: "A", count: wrongSource.A },
+    { key: "B", count: wrongSource.B },
+    { key: "C", count: wrongSource.C },
+    { key: "D", count: wrongSource.D },
+    { key: "E", count: wrongSource.E },
+    { key: "Blank", count: wrongSource.Blank },
+    { key: "Multiple", count: wrongSource.Multiple },
+  ];
+
+  const accepted =
+    item.wrongChoiceCounts || item.correctKey === "Per key"
+      ? []
+      : item.correctKey.split("+").filter(Boolean);
+
+  let wrongKey: keyof ChoiceDistribution | null = null;
+  let wrongCount = 0;
+  for (const b of wrongBuckets) {
+    if (b.count <= 0) continue;
+    if (accepted.includes(b.key)) continue;
+    if (b.count > wrongCount) {
+      wrongKey = b.key;
+      wrongCount = b.count;
+    }
+  }
+
+  if (!wrongKey || wrongCount === 0) {
+    return "All correct";
+  }
+  if (wrongKey === "Blank") {
+    return `Left blank (${wrongCount} of ${totalPapers})`;
+  }
+  if (wrongKey === "Multiple") {
+    return `Multiple marks (${wrongCount} of ${totalPapers})`;
+  }
+  if (wrongCount >= topCount) {
+    return `Most chose ${wrongKey} (${wrongCount} of ${totalPapers})`;
+  }
+  return `Common miss: ${wrongKey} (${wrongCount} of ${totalPapers})`;
 }

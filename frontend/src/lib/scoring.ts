@@ -144,11 +144,8 @@ export function evaluateQuestionScore(params: {
   };
 }
 
-/**
- * Recompute percentage score (0-100) and needsReview status from raw grader
- * output plus teacher corrections and question rules, matching backend scoring rules.
- */
-export function rescore({
+
+export function scorePaper({
   answerKey,
   points,
   questionRules,
@@ -206,3 +203,5 @@ export function rescore({
 
   return { score, needsReview, earnedPoints, totalPoints };
 }
+
+export const rescore = scorePaper;

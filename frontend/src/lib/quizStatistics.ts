@@ -1,4 +1,4 @@
-import { rescore } from "./scoring.ts";
+import { scorePaper } from "./scoring.ts";
 import { resolveQuizKeyForVersion } from "./workspace/keyVersion.ts";
 import type { Paper, Quiz } from "./workspace/schema.ts";
 
@@ -10,6 +10,7 @@ export interface ScoreBandBucket {
 
 export interface QuizStatistics {
   count: number;
+  totalPossiblePoints: number | null;
   minPoints: number | null;
   maxPoints: number | null;
   avgPoints: number | null;
@@ -22,6 +23,19 @@ export interface QuizStatistics {
   stdDevPct: number | null;
   buckets: ScoreBandBucket[];
 }
+
+const BAND_LABELS = [
+  "90 to 100%",
+  "80 to 89%",
+  "70 to 79%",
+  "60 to 69%",
+  "50 to 59%",
+  "40 to 49%",
+  "30 to 39%",
+  "20 to 29%",
+  "10 to 19%",
+  "0 to 9%",
+] as const;
 
 function summarizeNumbers(values: number[]): {
   min: number;
@@ -48,13 +62,24 @@ export function computeQuizStatistics(
   quiz: Quiz,
   papers: Paper[],
 ): QuizStatistics {
+  const baseKey = resolveQuizKeyForVersion(quiz, "A");
+  const baseTotal = scorePaper({
+    answerKey: baseKey.answerKey,
+    points: baseKey.points,
+    questionRules: baseKey.questionRules,
+    answers: Array<string>(baseKey.answerKey.length).fill(""),
+    flags: {},
+    corrections: {},
+  }).totalPoints;
+
   const graded = papers.filter(
-    (p) => p.status === "done" && p.answers.length === quiz.answerKey.length,
+    (p) => p.answers.length === quiz.answerKey.length,
   );
 
   if (graded.length === 0) {
     return {
       count: 0,
+      totalPossiblePoints: baseTotal,
       minPoints: null,
       maxPoints: null,
       avgPoints: null,
@@ -65,23 +90,22 @@ export function computeQuizStatistics(
       avgPct: null,
       medianPct: null,
       stdDevPct: null,
-      buckets: [
-        { label: "90–100%", count: 0, pctOfClass: 0 },
-        { label: "80–89%", count: 0, pctOfClass: 0 },
-        { label: "70–79%", count: 0, pctOfClass: 0 },
-        { label: "60–69%", count: 0, pctOfClass: 0 },
-        { label: "< 60%", count: 0, pctOfClass: 0 },
-      ],
+      buckets: BAND_LABELS.map((label) => ({
+        label,
+        count: 0,
+        pctOfClass: 0,
+      })),
     };
   }
 
   const ptsList: number[] = [];
   const pctList: number[] = [];
-  const bandCounts = [0, 0, 0, 0, 0];
+  const totalList: number[] = [];
+  const bandCounts = Array<number>(BAND_LABELS.length).fill(0);
 
   for (const paper of graded) {
     const keyData = resolveQuizKeyForVersion(quiz, paper.keyVersion);
-    const scored = rescore({
+    const scored = scorePaper({
       answerKey: keyData.answerKey,
       points: keyData.points,
       questionRules: keyData.questionRules,
@@ -91,32 +115,34 @@ export function computeQuizStatistics(
     });
     ptsList.push(scored.earnedPoints);
     pctList.push(scored.score);
+    totalList.push(scored.totalPoints);
 
-    if (scored.score >= 90) bandCounts[0] += 1;
-    else if (scored.score >= 80) bandCounts[1] += 1;
-    else if (scored.score >= 70) bandCounts[2] += 1;
-    else if (scored.score >= 60) bandCounts[3] += 1;
-    else bandCounts[4] += 1;
+    const bandIdx =
+      scored.score >= 90
+        ? 0
+        : Math.min(9, Math.max(0, 9 - Math.floor(scored.score / 10)));
+    bandCounts[bandIdx] += 1;
   }
 
   const ptsStats = summarizeNumbers(ptsList);
   const pctStats = summarizeNumbers(pctList);
-  const labels = ["90–100%", "80–89%", "70–79%", "60–69%", "< 60%"];
   const n = graded.length;
+  const hasMixedTotals = new Set(totalList).size > 1;
 
   return {
     count: n,
-    minPoints: ptsStats.min,
-    maxPoints: ptsStats.max,
-    avgPoints: ptsStats.avg,
-    medianPoints: ptsStats.median,
-    stdDevPoints: ptsStats.stdDev,
+    totalPossiblePoints: hasMixedTotals ? null : (totalList[0] ?? baseTotal),
+    minPoints: hasMixedTotals ? null : ptsStats.min,
+    maxPoints: hasMixedTotals ? null : ptsStats.max,
+    avgPoints: hasMixedTotals ? null : ptsStats.avg,
+    medianPoints: hasMixedTotals ? null : ptsStats.median,
+    stdDevPoints: hasMixedTotals ? null : ptsStats.stdDev,
     minPct: pctStats.min,
     maxPct: pctStats.max,
     avgPct: pctStats.avg,
     medianPct: pctStats.median,
     stdDevPct: pctStats.stdDev,
-    buckets: labels.map((label, idx) => ({
+    buckets: BAND_LABELS.map((label, idx) => ({
       label,
       count: bandCounts[idx],
       pctOfClass: Math.round((bandCounts[idx] / n) * 1000) / 10,

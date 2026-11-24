@@ -1,52 +1,41 @@
 export * from "./schema.ts";
-export { base64ToBytes, EXPORT_VERSION } from "./serialize.ts";
+export {
+  FOLDER_CHANGED_EVENT,
+  WORKSPACE_CHANGED_EVENT,
+  getActiveFolder,
+  notifyWorkspaceChanged,
+  requireActiveFolder,
+  setActiveFolder,
+} from "./activeFolder.ts";
 export {
   getAvailableKeyVersions,
   resolveQuizKeyForVersion,
 } from "./keyVersion.ts";
 export {
-  generateUniqueStudentCode,
-  getWorkspaceSaveStatus,
-  markWorkspaceExported,
-  markWorkspaceSaved,
-  parseFullName,
-} from "./helpers.ts";
-export {
-  deleteBatch,
-  deleteQuiz,
-  getQuizWorkspace,
-  listQuizzes,
-  listQuizSummaries,
-  saveBatch,
-  saveQuiz,
-} from "./quizzes.ts";
-export {
-  addFailedPaper,
-  addPaper,
   computePaperPoints,
+  createFolder,
+  deleteClass,
+  deleteFolder,
   deletePaper,
-  getPaperImageUrl,
-  getPaperSnapshot,
-  getReviewQueue,
-  replacePaperResult,
-  restorePaperSnapshot,
-  submitReview,
-} from "./papers.ts";
-export {
-  deleteSection,
+  deleteQuiz,
   deleteStudent,
-  getRoster,
-  saveSection,
-  saveStudent,
-} from "./roster.ts";
-export {
+  exportQuizCsv,
+  generateUniqueStudentCode,
   getClassDetail,
+  getPaperImageUrl,
+  getQuizWorkspace,
+  getReviewQueue,
+  getRoster,
   getStudentDetail,
+  gradeQuizPaper,
+  importStudents,
   listClassSummaries,
-} from "./reports.ts";
-export {
-  exportBatchCsv,
-  exportWorkspace,
-  exportWorkspaceJsonString,
-  importWorkspace,
-} from "./backup.ts";
+  listFolders,
+  listQuizSummaries,
+  renameFolder,
+  saveClass,
+  saveQuiz,
+  saveStudent,
+  submitReview,
+  validateFolderName,
+} from "./client.ts";

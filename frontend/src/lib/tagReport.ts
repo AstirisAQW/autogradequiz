@@ -39,10 +39,9 @@ export function collectAllQuizTags(quiz: Quiz): string[] {
 
 export function computeTagReport(quiz: Quiz, papers: Paper[]): QuizTagReport {
   const graded = papers.filter(
-    (p) => p.status === "done" && p.answers.length === quiz.answerKey.length,
+    (p) => p.answers.length === quiz.answerKey.length,
   );
 
-  // Discover all question-level tags defined on primary (and alternates if any)
   const questionNumsByTag = new Map<string, Set<number>>();
   const registerTags = (rules: Quiz["questionRules"]) => {
     rules?.forEach((rule, idx) => {

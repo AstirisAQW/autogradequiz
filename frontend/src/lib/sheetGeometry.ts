@@ -1,11 +1,11 @@
-export interface TemplateColumnSpec {
+interface TemplateColumnSpec {
   originX: number;
   originY: number;
   start: number;
   end: number;
 }
 
-export interface TemplateLayoutSpec {
+interface TemplateLayoutSpec {
   bubbleRadiusMm: number;
   choiceSpacingMm: number;
   rowSpacingMm: number;
@@ -15,13 +15,13 @@ export interface TemplateLayoutSpec {
 
 export const PAGE_WIDTH_MM = 210.0;
 export const PAGE_HEIGHT_MM = 297.0;
-export const ROW_GROUP_SIZE = 10;
-export const ROW_GROUP_GAP_MM = 5.0;
+const ROW_GROUP_SIZE = 10;
+const ROW_GROUP_GAP_MM = 5.0;
 
 export const KEY_VERSION_CHOICES = ["A", "B", "C", "D"] as const;
-export const KEY_VERSION_ORIGIN_X_MM = 56.0;
-export const KEY_VERSION_ORIGIN_Y_MM = 47.0;
-export const KEY_VERSION_SPACING_MM = 18.0;
+const KEY_VERSION_ORIGIN_X_MM = 56.0;
+const KEY_VERSION_ORIGIN_Y_MM = 47.0;
+const KEY_VERSION_SPACING_MM = 18.0;
 export const KEY_VERSION_BUBBLE_RADIUS_MM = 2.4;
 
 export function keyVersionBubbleCenterMm(versionIndex: number): {
@@ -34,7 +34,7 @@ export function keyVersionBubbleCenterMm(versionIndex: number): {
   };
 }
 
-export const TEMPLATE_LAYOUT_BY_COUNT: Record<number, TemplateLayoutSpec> = {
+const TEMPLATE_LAYOUT_BY_COUNT: Record<number, TemplateLayoutSpec> = {
   20: {
     bubbleRadiusMm: 3.0,
     choiceSpacingMm: 9.0,
@@ -78,7 +78,7 @@ export interface QuestionRegionBox {
   height: number;
 }
 
-export function getTemplateLayoutSpec(totalQuestions: number): TemplateLayoutSpec {
+function getTemplateLayoutSpec(totalQuestions: number): TemplateLayoutSpec {
   return (
     TEMPLATE_LAYOUT_BY_COUNT[totalQuestions] ??
     (totalQuestions <= 20
