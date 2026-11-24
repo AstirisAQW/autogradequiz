@@ -45,7 +45,7 @@ export function TagInput({
           {tags.map((tag) => (
             <span
               key={tag}
-              className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-subtle)] px-2.5 py-0.5 text-[12px] font-medium text-[var(--text-primary)]"
+              className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-subtle)] px-2.5 py-0.5 text-xs font-medium text-[var(--text-primary)]"
             >
               <span>{tag}</span>
               <button
@@ -87,14 +87,14 @@ export function TagInput({
       </div>
 
       {unusedSuggestions.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+        <div className="flex flex-wrap items-center gap-1.5 text-[0.6875rem] text-[var(--text-muted)]">
           <span>Suggestions:</span>
           {unusedSuggestions.slice(0, 8).map((sug) => (
             <button
               key={sug}
               type="button"
               onClick={() => addTag(sug)}
-              className="rounded-full border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--brand)] hover:text-[var(--brand-text)]"
+              className="rounded-full border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-2 py-0.5 text-[0.6875rem] text-[var(--text-secondary)] hover:border-[var(--brand)] hover:text-[var(--brand-text)]"
             >
               + {sug}
             </button>

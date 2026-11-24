@@ -22,6 +22,7 @@ export interface GradedSheetOverlayProps {
   points?: number[];
   questionRules?: QuestionRule[];
   keyVersion?: KeyVersionId;
+  showKeyVersion?: boolean;
   answers: string[];
   flags: Record<string, FlagReason>;
   corrections: Record<number, string>;
@@ -32,6 +33,7 @@ export function GradedSheetOverlay({
   points,
   questionRules,
   keyVersion,
+  showKeyVersion = false,
   answers,
   flags,
   corrections,
@@ -43,11 +45,12 @@ export function GradedSheetOverlay({
   const ringRadius = baseRadius * 1.32;
   const strokeWidth = Math.max(0.65, baseRadius * 0.28);
 
-  const keyVersionIdx = keyVersion
-    ? KEY_VERSION_CHOICES.indexOf(
-        keyVersion as (typeof KEY_VERSION_CHOICES)[number],
-      )
-    : -1;
+  const keyVersionIdx =
+    showKeyVersion && keyVersion
+      ? KEY_VERSION_CHOICES.indexOf(
+          keyVersion as (typeof KEY_VERSION_CHOICES)[number],
+        )
+      : -1;
   const keyVersionCenter =
     keyVersionIdx !== -1 ? keyVersionBubbleCenterMm(keyVersionIdx) : null;
 
@@ -213,7 +216,7 @@ export function GradedSheetOverlay({
 
 export function GradedOverlayLegend() {
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[var(--text-secondary)]">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.6875rem] text-[var(--text-secondary)]">
       <span className="inline-flex items-center gap-1.5">
         <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-[#16a34a] bg-[#16a34a]/15" />
         Correct

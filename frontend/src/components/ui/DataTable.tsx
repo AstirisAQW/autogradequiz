@@ -13,7 +13,10 @@ export interface DataTableProps<T> {
   columns: DataTableColumn<T>[];
   rowKey: (row: T) => string | number;
   renderActions?: (row: T) => ReactNode;
-  maxHeightClass?: string;
+  onRowClick?: (row: T) => void;
+  colgroup?: ReactNode;
+  tableClassName?: string;
+  actionsHeaderSrOnly?: boolean;
 }
 
 export function DataTable<T>({
@@ -21,19 +24,21 @@ export function DataTable<T>({
   columns,
   rowKey,
   renderActions,
-  maxHeightClass = "max-h-[540px]",
+  onRowClick,
+  colgroup,
+  tableClassName = "",
+  actionsHeaderSrOnly = false,
 }: DataTableProps<T>) {
   return (
-    <div
-      className={`overflow-auto rounded-[12px] border border-[var(--border-hairline)] bg-[var(--bg-surface)] ${maxHeightClass}`}
-    >
-      <table className="w-full border-collapse text-left text-[14px]">
-        <thead className="sticky top-0 z-10 border-b border-[var(--border-hairline)] bg-[var(--bg-subtle)]">
+    <div className="relative overflow-x-auto rounded-xl border border-[var(--border-hairline)] bg-[var(--bg-surface)]">
+      <table className={`w-full border-collapse text-left text-sm ${tableClassName}`}>
+        {colgroup}
+        <thead className="border-b border-[var(--border-hairline)] bg-[var(--bg-subtle)]">
           <tr>
             {columns.map((col) => (
               <th
                 key={col.key}
-                className={`px-4 py-2.5 text-[12px] font-medium uppercase tracking-wide text-[var(--text-secondary)] ${
+                className={`px-4 py-2.5 text-xs font-semibold whitespace-nowrap text-[var(--text-secondary)] ${
                   col.align === "right" ? "text-right" : "text-left"
                 } ${col.className ?? ""}`}
               >
@@ -41,8 +46,12 @@ export function DataTable<T>({
               </th>
             ))}
             {renderActions && (
-              <th className="px-4 py-2.5 text-right text-[12px] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-                Actions
+              <th className="px-4 py-2.5 text-right text-xs font-semibold whitespace-nowrap text-[var(--text-secondary)]">
+                {actionsHeaderSrOnly ? (
+                  <span className="sr-only">Actions</span>
+                ) : (
+                  "Actions"
+                )}
               </th>
             )}
           </tr>
@@ -51,7 +60,45 @@ export function DataTable<T>({
           {rows.map((row) => (
             <tr
               key={rowKey(row)}
-              className="transition-colors hover:bg-[var(--bg-subtle)]/60"
+              tabIndex={onRowClick ? 0 : undefined}
+              role={onRowClick ? "button" : undefined}
+              onClick={
+                onRowClick
+                  ? (e) => {
+                      const target = e.target as HTMLElement | null;
+                      if (
+                        target?.closest(
+                          'button, a, input, select, [data-stop-row="true"]',
+                        )
+                      ) {
+                        return;
+                      }
+                      onRowClick(row);
+                    }
+                  : undefined
+              }
+              onKeyDown={
+                onRowClick
+                  ? (e) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      const target = e.target as HTMLElement | null;
+                      if (
+                        target?.closest(
+                          'button, a, input, select, [data-stop-row="true"]',
+                        )
+                      ) {
+                        return;
+                      }
+                      e.preventDefault();
+                      onRowClick(row);
+                    }
+                  : undefined
+              }
+              className={`transition-colors ${
+                onRowClick
+                  ? "cursor-pointer hover:bg-black/[0.02] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--brand)]"
+                  : "hover:bg-black/[0.02]"
+              }`}
             >
               {columns.map((col) => (
                 <td
@@ -65,7 +112,10 @@ export function DataTable<T>({
               ))}
               {renderActions && (
                 <td className="px-4 py-3 text-right">
-                  <div className="inline-flex items-center justify-end gap-2">
+                  <div
+                    data-stop-row="true"
+                    className="inline-flex items-center justify-end gap-2"
+                  >
                     {renderActions(row)}
                   </div>
                 </td>

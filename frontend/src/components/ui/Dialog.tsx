@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useId, type ReactNode } from "react";
 import { Button } from "./Button";
 
 export interface DialogProps {
@@ -30,6 +30,8 @@ export function Dialog({
   onClose,
   children,
 }: DialogProps) {
+  const titleId = useId();
+
   useEffect(() => {
     if (!open) return;
     function onKeyDown(e: KeyboardEvent) {
@@ -45,18 +47,18 @@ export function Dialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby="dialog-title"
+      aria-labelledby={titleId}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget && !busy) onClose();
       }}
     >
-      <div className="w-full max-w-md rounded-[12px] border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
-        <h2 id="dialog-title" className="text-[16px] font-medium text-[var(--text-primary)]">
+      <div className="w-full max-w-md rounded-xl border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-6">
+        <h2 id={titleId} className="text-base font-medium text-[var(--text-primary)]">
           {title}
         </h2>
         {description && (
-          <p className="mt-2 text-[14px] text-[var(--text-secondary)]">
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">
             {description}
           </p>
         )}

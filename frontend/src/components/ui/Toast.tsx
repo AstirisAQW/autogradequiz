@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
   type ReactNode,
@@ -45,9 +46,23 @@ const TONE_CLASSES: Record<ToastTone, string> = {
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
   const nextIdRef = useRef(0);
+  const timersRef = useRef<Map<number, number>>(new Map());
 
   const dismiss = useCallback((id: number) => {
+    const timer = timersRef.current.get(id);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      timersRef.current.delete(id);
+    }
     setItems((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      timers.clear();
+    };
   }, []);
 
   const push = useCallback(
@@ -70,7 +85,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           onAction: options?.onAction,
         },
       ]);
-      window.setTimeout(() => dismiss(id), durationMs);
+      const timer = window.setTimeout(() => dismiss(id), durationMs);
+      timersRef.current.set(id, timer);
     },
     [dismiss],
   );
@@ -87,7 +103,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={item.id}
             role="status"
-            className={`pointer-events-auto flex items-center justify-between gap-3 rounded-[8px] border px-4 py-2.5 text-[14px] shadow-sm ${TONE_CLASSES[item.tone]}`}
+            className={`pointer-events-auto flex items-center justify-between gap-3 rounded-lg border px-4 py-2.5 text-sm shadow-sm ${TONE_CLASSES[item.tone]}`}
           >
             <span>{item.message}</span>
             <div className="flex shrink-0 items-center gap-2">
@@ -99,7 +115,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                     dismiss(item.id);
                     if (fn) void fn();
                   }}
-                  className="rounded-[6px] border border-current/25 bg-black/5 px-2.5 py-1 text-[12px] font-semibold underline-offset-2 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]"
+                  className="rounded-md border border-current/25 bg-black/5 px-2.5 py-1 text-xs font-semibold underline-offset-2 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]"
                 >
                   {item.actionLabel}
                 </button>
@@ -108,7 +124,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 type="button"
                 onClick={() => dismiss(item.id)}
                 aria-label="Dismiss notification"
-                className="rounded px-1.5 py-1 text-[12px] font-medium opacity-80 hover:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]"
+                className="rounded px-1.5 py-1 text-xs font-medium opacity-80 hover:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]"
               >
                 Dismiss
               </button>

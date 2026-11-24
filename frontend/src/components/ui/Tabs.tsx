@@ -22,7 +22,7 @@ export function Tabs<T extends string = string>({
   return (
     <div
       role="tablist"
-      className={`flex flex-wrap gap-6 border-b border-[var(--border-hairline)] ${className}`}
+      className={`flex flex-nowrap gap-5 overflow-x-auto border-b border-[var(--border-hairline)] sm:gap-6 ${className}`}
     >
       {items.map((tab) => {
         const active = tab.id === activeId;
@@ -33,15 +33,17 @@ export function Tabs<T extends string = string>({
             role="tab"
             aria-selected={active}
             onClick={() => onChange(tab.id)}
-            className={`inline-flex items-center gap-2 border-b-2 pb-2.5 text-[14px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] ${
+            className={`inline-flex shrink-0 items-center gap-2 border-b-2 px-0.5 pb-2.5 text-sm whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] ${
               active
-                ? "border-[var(--brand)] text-[var(--text-primary)]"
-                : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                ? "border-[var(--brand)] font-bold text-[var(--text-primary)]"
+                : "border-transparent font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             }`}
           >
-            <span>{tab.label}</span>
+            <span className="tab-label" data-text={tab.label}>
+              {tab.label}
+            </span>
             {tab.count !== undefined && (
-              <span className="rounded-full bg-[var(--bg-subtle)] px-2 py-0.5 text-[12px] font-medium text-[var(--text-secondary)] tabular-nums">
+              <span className="rounded-full bg-[var(--bg-subtle)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)] tabular-nums">
                 {tab.count}
               </span>
             )}

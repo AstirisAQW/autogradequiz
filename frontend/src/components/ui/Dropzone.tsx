@@ -55,7 +55,7 @@ export function Dropzone({
         setDragging(false);
         handleFileList(e.dataTransfer.files);
       }}
-      className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-[12px] border border-dashed px-6 py-8 text-center transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] ${
+      className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed px-6 py-8 text-center transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] ${
         disabled
           ? "cursor-not-allowed border-[var(--border-hairline)] bg-[var(--bg-subtle)] opacity-60"
           : dragging
@@ -72,10 +72,10 @@ export function Dropzone({
         onChange={(e) => handleFileList(e.target.files)}
         className="sr-only"
       />
-      <p className="text-[14px] font-medium text-[var(--text-primary)]">
+      <p className="text-sm font-medium text-[var(--text-primary)]">
         {label}
       </p>
-      <p className="text-[12px] text-[var(--text-muted)]">{hint}</p>
+      <p className="text-xs text-[var(--text-muted)]">{hint}</p>
     </div>
   );
 }

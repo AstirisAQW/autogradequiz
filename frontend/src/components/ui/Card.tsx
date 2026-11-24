@@ -13,7 +13,7 @@ export function Card({
 }: CardProps) {
   return (
     <div
-      className={`rounded-[12px] border border-[var(--border-hairline)] bg-[var(--bg-surface)] ${padded ? "p-6" : ""} ${className}`}
+      className={`rounded-xl border border-[var(--border-hairline)] bg-[var(--bg-surface)] ${padded ? "p-6" : ""} ${className}`}
       {...rest}
     >
       {children}
