@@ -1,98 +1,140 @@
 @import "tailwindcss";
 
 :root {
-  --bg-page: #fafafa;
+  --bg-page: #f8f9f6;
   --bg-surface: #ffffff;
-  --bg-subtle: #f4f4f5;
+  --bg-subtle: #f1f2ee;
+
+  --sidebar-bg: #0b4a36;
+  --sidebar-surface: #0f5a42;
+  --sidebar-hover: rgb(255 255 255 / 0.1);
+  --sidebar-active: rgb(255 255 255 / 0.16);
+  --gold: #f5c344;
 
   --text-primary: #18181b;
-  --text-secondary: #3f3f46;
-  --text-muted: #52525b;
+  --text-secondary: #52525b;
+  --text-muted: #71717a;
 
-  --border-hairline: rgba(0, 0, 0, 0.08);
-  --border-strong: rgba(0, 0, 0, 0.16);
+  --border-hairline: rgb(0 0 0 / 0.12);
+  --border-strong: rgb(0 0 0 / 0.2);
 
-  --brand: #004d38;
-  --brand-hover: #003b2b;
-  --brand-subtle: #e6f2ee;
-  --brand-text: #004d38;
+  --brand: #0b4a36;
+  --brand-hover: #083828;
+  --brand-subtle: #e8f3ee;
+  --brand-text: #0b4a36;
 
   --success: #15803d;
   --success-bg: #dcfce7;
   --success-text: #14532d;
 
-  --warning: #b45309;
   --warning-bg: #fef3c7;
-  --warning-text: #78350f;
+  --warning-text: #92400e;
 
   --danger: #b91c1c;
   --danger-hover: #991b1b;
   --danger-bg: #fee2e2;
   --danger-text: #7f1d1d;
 
-  --radius-control: 8px;
-  --radius-card: 12px;
-
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  [data-theme="auto"] {
-    --bg-page: #111315;
-    --bg-surface: #181b1e;
-    --bg-subtle: #202428;
-
-    --text-primary: #f4f4f5;
-    --text-secondary: #a1a1aa;
-    --text-muted: #9ca3af;
-
-    --border-hairline: rgba(255, 255, 255, 0.09);
-    --border-strong: rgba(255, 255, 255, 0.18);
-
-    --brand: #004d38;
-    --brand-hover: #006147;
-    --brand-subtle: #0d2b22;
-    --brand-text: #6ee7b7;
-
-    --success-bg: #143321;
-    --success-text: #86efac;
-
-    --warning-bg: #3b2609;
-    --warning-text: #fcd34d;
-
-    --danger-bg: #3f1515;
-    --danger-text: #fca5a5;
-
-    color-scheme: dark;
-  }
-}
-
 @theme inline {
-  --color-background: var(--bg-page);
-  --color-foreground: var(--text-primary);
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-sora), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
+@media (min-width: 1024px) {
+  html {
+    scrollbar-gutter: stable;
+  }
 }
 
 body {
   background: var(--bg-page);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 400;
   line-height: 1.5;
 }
 
 h1 {
   font-family: var(--font-heading);
-  font-size: 22px;
-  font-weight: 500;
-  line-height: 1.3;
-  letter-spacing: -0.015em;
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
 }
 
 h2 {
-  font-size: 16px;
-  font-weight: 500;
+  font-size: 1rem;
+  font-weight: 600;
   line-height: 1.35;
+}
+
+td,
+.tabular-nums,
+input[type="date"] {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (pointer: coarse) {
+  button,
+  a,
+  [role="tab"] {
+    min-height: 48px;
+  }
+}
+
+.tab-label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.tab-label::after {
+  content: attr(data-text);
+  font-weight: 700;
+  visibility: hidden;
+  height: 0;
+  overflow: hidden;
+  display: block;
+  user-select: none;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  button:not(:disabled):active {
+    transform: scale(0.97);
+  }
+  .slide-next {
+    animation: slideFromRight 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .slide-prev {
+    animation: slideFromLeft 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes slideFromRight {
+    from {
+      opacity: 0;
+      transform: translateX(26px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  @keyframes slideFromLeft {
+    from {
+      opacity: 0;
+      transform: translateX(-26px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
 }

@@ -5,29 +5,30 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AddStudentPickerDialog,
-  DeleteSectionDialog,
-  EditSectionDialog,
-} from "@/components/roster/SectionModals";
+  DeleteClassDialog,
+  EditClassDialog,
+} from "@/components/roster/ClassModals";
 import { StudentFormDrawer } from "@/components/roster/StudentFormDrawer";
-import { Badge } from "@/components/ui/Badge";
+import { ActionMenu } from "@/components/ui/ActionMenu";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { Button } from "@/components/ui/Button";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, SelectInput, TextInput } from "@/components/ui/Field";
-import { DocumentIcon, UsersIcon } from "@/components/ui/Icons";
+import { DocumentIcon, UsersIcon, WarningIcon } from "@/components/ui/Icons";
 import { SkeletonRows } from "@/components/ui/Skeleton";
-import { StatCard } from "@/components/ui/StatCard";
 import { Tabs } from "@/components/ui/Tabs";
 import { useToast } from "@/components/ui/Toast";
-import { formatDate } from "@/lib/format";
+import { getErrorMessage } from "@/lib/api";
+import { formatHumanDate } from "@/lib/format";
 import {
   generateUniqueStudentCode,
   getClassDetail,
   getRoster,
   saveStudent,
   type ClassDetail,
+  type ClassWithCount,
   type QuizSummary,
-  type SectionWithCount,
   type Student,
 } from "@/lib/workspace";
 
@@ -41,9 +42,10 @@ export default function ClassDetailPage() {
   const classId = params.id;
 
   const [detail, setDetail] = useState<ClassDetail | null>(null);
-  const [allClasses, setAllClasses] = useState<SectionWithCount[]>([]);
+  const [allClasses, setAllClasses] = useState<ClassWithCount[]>([]);
   const [allStudents, setAllStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
 
   const [activeTab, setActiveTab] = useState<DetailTab>("students");
@@ -62,8 +64,9 @@ export default function ClassDetailPage() {
   const [suggestedCode, setSuggestedCode] = useState("");
   const [drawerNonce, setDrawerNonce] = useState(0);
 
-  const loadData = useCallback(async () => {
+  const loadClassDetail = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [classData, roster] = await Promise.all([
         getClassDetail(classId),
@@ -75,9 +78,11 @@ export default function ClassDetailPage() {
         return;
       }
       setDetail(classData);
-      setAllClasses(roster.sections);
+      setAllClasses(roster.classes);
       setAllStudents(roster.students);
       setNotFound(false);
+    } catch (err) {
+      setLoadError(getErrorMessage(err, "Could not load class."));
     } finally {
       setLoading(false);
     }
@@ -86,12 +91,12 @@ export default function ClassDetailPage() {
   useEffect(() => {
     let active = true;
     queueMicrotask(() => {
-      if (active) void loadData();
+      if (active) void loadClassDetail();
     });
     return () => {
       active = false;
     };
-  }, [loadData]);
+  }, [loadClassDetail]);
 
   const classById = useMemo(
     () => new Map(allClasses.map((s) => [s.id, s])),
@@ -111,7 +116,23 @@ export default function ClassDetailPage() {
           stu.externalRef.toLowerCase().includes(q)
         );
       })
-      .sort((a, b) => a[sortBy].localeCompare(b[sortBy]));
+      .sort(
+        (a, b) =>
+          a[sortBy].localeCompare(b[sortBy], undefined, {
+            numeric: true,
+            sensitivity: "base",
+          }) ||
+          a.lastName.localeCompare(b.lastName, undefined, {
+            sensitivity: "base",
+          }) ||
+          a.firstName.localeCompare(b.firstName, undefined, {
+            sensitivity: "base",
+          }) ||
+          a.studentCode.localeCompare(b.studentCode, undefined, {
+            numeric: true,
+            sensitivity: "base",
+          }),
+      );
   }, [detail, search, sortBy]);
 
   function openNewStudentDrawer() {
@@ -129,8 +150,8 @@ export default function ClassDetailPage() {
 
   async function handleRemoveStudentFromClass(stu: Student) {
     if (!detail || updatingStudentId !== null) return;
-    const classSection = detail.section;
-    const previousSectionIds = [...stu.sectionIds];
+    const targetClass = detail.class;
+    const previousClassIds = [...stu.classIds];
     setUpdatingStudentId(stu.id);
     try {
       await saveStudent({
@@ -139,11 +160,11 @@ export default function ClassDetailPage() {
         firstName: stu.firstName,
         lastName: stu.lastName,
         externalRef: stu.externalRef,
-        sectionIds: stu.sectionIds.filter((id) => id !== classSection.id),
+        classIds: stu.classIds.filter((id) => id !== targetClass.id),
       });
-      await loadData();
+      await loadClassDetail();
       pushToast(
-        `Removed ${stu.firstName} ${stu.lastName} from ${classSection.name}.`,
+        `Removed ${stu.firstName} ${stu.lastName} from ${targetClass.name}.`,
         "info",
         {
           actionLabel: "Undo",
@@ -155,18 +176,16 @@ export default function ClassDetailPage() {
                 firstName: stu.firstName,
                 lastName: stu.lastName,
                 externalRef: stu.externalRef,
-                sectionIds: previousSectionIds,
+                classIds: previousClassIds,
               });
-              await loadData();
+              await loadClassDetail();
               pushToast(
-                `Restored ${stu.firstName} ${stu.lastName} to ${classSection.name}.`,
+                `Restored ${stu.firstName} ${stu.lastName} to ${targetClass.name}.`,
                 "success",
               );
             } catch (err) {
               pushToast(
-                err instanceof Error
-                  ? err.message
-                  : "Could not restore student to class.",
+                getErrorMessage(err, "Could not restore student to class."),
                 "error",
               );
             }
@@ -174,10 +193,7 @@ export default function ClassDetailPage() {
         },
       );
     } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Could not remove student.",
-        "error",
-      );
+      pushToast(getErrorMessage(err, "Could not remove student."), "error");
     } finally {
       setUpdatingStudentId(null);
     }
@@ -191,25 +207,41 @@ export default function ClassDetailPage() {
     );
   }
 
+  if (loadError && !detail) {
+    return (
+      <div className="space-y-4">
+        <Breadcrumb
+          items={[{ label: "Classes", href: "/classes" }, { label: "Error" }]}
+        />
+        <EmptyState
+          icon={<WarningIcon />}
+          title="Could not load class"
+          description={loadError}
+          nextStep="Confirm the backend server is running and try again."
+          action={
+            <Button variant="primary" onClick={() => void loadClassDetail()}>
+              Try again
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
   if (notFound || !detail) {
     return (
       <div className="space-y-4">
-        <Link
-          href="/classes"
-          className="text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-        >
-          ← Back to classes
-        </Link>
+        <Breadcrumb
+          items={[{ label: "Classes", href: "/classes" }, { label: "Not found" }]}
+        />
         <EmptyState
           icon={<UsersIcon />}
           title="Class not found"
-          description="This class does not exist in the local workspace."
+          description="This class does not exist in this folder."
+          nextStep="Return to Classes to open or create a class."
           action={
-            <Link
-              href="/classes"
-              className="inline-flex rounded-[8px] bg-[var(--brand)] px-3.5 py-2 text-[14px] font-medium text-white hover:bg-[var(--brand-hover)]"
-            >
-              View all classes
+            <Link href="/classes">
+              <Button variant="primary">All classes</Button>
             </Link>
           }
         />
@@ -217,16 +249,20 @@ export default function ClassDetailPage() {
     );
   }
 
-  const cls = detail.section;
+  const cls = detail.class;
+  const showStudentFilters = detail.students.length >= 5 || Boolean(search.trim());
+  const hasUnenrolledStudents = allStudents.some(
+    (stu) => !stu.classIds.includes(cls.id),
+  );
 
   const studentColumns: DataTableColumn<Student>[] = [
     {
       key: "name",
-      header: "Student",
+      header: "Name",
       render: (stu) => (
         <Link
           href={`/students/${stu.id}`}
-          className="font-medium text-[var(--text-primary)] hover:text-[var(--brand-text)] hover:underline"
+          className="font-semibold text-[var(--text-primary)] hover:text-[var(--brand-text)] hover:underline"
         >
           {stu.lastName}, {stu.firstName}
         </Link>
@@ -236,16 +272,14 @@ export default function ClassDetailPage() {
       key: "studentCode",
       header: "Student ID",
       render: (stu) => (
-        <span className="font-mono text-[13px] tabular-nums">
-          {stu.studentCode}
-        </span>
+        <span className="tabular-nums">{stu.studentCode}</span>
       ),
     },
     {
       key: "externalRef",
-      header: "External Ref",
+      header: "LRN",
       render: (stu) => (
-        <span className="text-[var(--text-secondary)]">
+        <span className="text-[var(--text-secondary)] tabular-nums">
           {stu.externalRef || "—"}
         </span>
       ),
@@ -254,26 +288,14 @@ export default function ClassDetailPage() {
       key: "otherClasses",
       header: "Other classes",
       render: (stu) => {
-        const others = stu.sectionIds
+        const others = stu.classIds
           .filter((id) => id !== cls.id)
           .map((id) => classById.get(id))
-          .filter((s): s is SectionWithCount => s !== undefined);
+          .filter((s): s is ClassWithCount => s !== undefined);
         if (others.length === 0) {
           return <span className="text-[var(--text-muted)]">—</span>;
         }
-        return (
-          <div className="flex flex-wrap gap-1">
-            {others.map((other) => (
-              <Link
-                key={other.id}
-                href={`/classes/${other.id}`}
-                className="rounded bg-[var(--bg-subtle)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--brand-text)]"
-              >
-                {other.name}
-              </Link>
-            ))}
-          </div>
-        );
+        return others.map((other) => other.name).join(", ");
       },
     },
   ];
@@ -283,34 +305,20 @@ export default function ClassDetailPage() {
       key: "name",
       header: "Quiz",
       render: (q) => (
-        <div>
-          <Link
-            href={`/quizzes/${q.id}`}
-            className="font-medium text-[var(--text-primary)] hover:text-[var(--brand-text)] hover:underline"
-          >
-            {q.name}
-          </Link>
-          {(q.tags?.length ?? 0) > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {(q.tags ?? []).map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-full border border-[var(--border-hairline)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)]"
-                >
-                  #{tag}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+        <Link
+          href={`/quizzes/${q.id}`}
+          className="font-semibold text-[var(--text-primary)] hover:text-[var(--brand-text)] hover:underline"
+        >
+          {q.name}
+        </Link>
       ),
     },
     {
       key: "format",
       header: "Format",
       render: (q) => (
-        <span className="text-[var(--text-secondary)]">
-          {q.answerKey.length}Q · A4
+        <span className="text-[var(--text-secondary)] tabular-nums">
+          {q.answerKey.length} questions, A4 form
         </span>
       ),
     },
@@ -319,17 +327,26 @@ export default function ClassDetailPage() {
       header: "Papers",
       align: "right",
       render: (q) => (
-        <span className="font-mono tabular-nums">{q.paperCount}</span>
+        <span className="font-semibold tabular-nums">{q.paperCount}</span>
       ),
     },
     {
       key: "status",
       header: "Status",
       render: (q) =>
-        q.needsReviewCount > 0 ? (
-          <Badge variant="warning">{q.needsReviewCount} need review</Badge>
+        q.answerKey.some((a) => !a) ? (
+          <span className="text-[0.8125rem] font-medium text-[var(--warning-text)]">
+            Key not set
+          </span>
+        ) : q.needsReviewCount > 0 ? (
+          <span className="text-[0.8125rem] font-medium text-[var(--warning-text)] tabular-nums">
+            {q.needsReviewCount}{" "}
+            {q.needsReviewCount === 1 ? "needs review" : "need review"}
+          </span>
         ) : (
-          <Badge variant="success">Clear</Badge>
+          <span className="text-[0.8125rem] font-medium text-[var(--success-text)]">
+            Confirmed
+          </span>
         ),
     },
     {
@@ -337,51 +354,56 @@ export default function ClassDetailPage() {
       header: "Date",
       render: (q) => (
         <span className="text-[var(--text-secondary)] tabular-nums">
-          {q.date || formatDate(q.createdAt)}
+          {formatHumanDate(q.date || q.createdAt)}
         </span>
       ),
     },
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <nav
-          aria-label="Breadcrumb"
-          className="text-[13px] text-[var(--text-secondary)]"
-        >
-          <Link href="/classes" className="hover:text-[var(--text-primary)]">
-            ← Classes
-          </Link>{" "}
-          <span className="text-[var(--text-muted)]">/</span>{" "}
-          <span className="text-[var(--text-primary)]">{cls.name}</span>
-        </nav>
+    <div className="space-y-5">
+      <div>
+        <Breadcrumb
+          items={[{ label: "Classes", href: "/classes" }, { label: cls.name }]}
+        />
 
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1>{cls.name}</h1>
-            <p className="mt-0.5 text-[13px] text-[var(--text-secondary)]">
-              {cls.term ? `${cls.term} · ` : ""}Created {formatDate(cls.createdAt)}
-            </p>
+            {cls.term && (
+              <p className="mt-1.5 text-sm text-[var(--text-secondary)]">
+                Term: {cls.term}
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => setEditClassOpen(true)}
-            >
-              Edit class
+            {hasUnenrolledStudents && (
+              <Button variant="secondary" onClick={() => setPickerOpen(true)}>
+                Add existing students
+              </Button>
+            )}
+            <Button variant="primary" onClick={openNewStudentDrawer}>
+              New student
             </Button>
-            <Button variant="ghost" onClick={() => setDeleteClassOpen(true)}>
-              Delete
-            </Button>
+            <ActionMenu
+              label="More class actions"
+              items={[
+                {
+                  id: "edit",
+                  label: "Edit class",
+                  onClick: () => setEditClassOpen(true),
+                },
+                { kind: "divider", id: "div-1" },
+                {
+                  id: "delete",
+                  label: "Delete class",
+                  variant: "danger",
+                  onClick: () => setDeleteClassOpen(true),
+                },
+              ]}
+            />
           </div>
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <StatCard label="Students" value={detail.students.length} />
-        <StatCard label="Assigned Quizzes" value={detail.quizzes.length} />
-        <StatCard label="Term" value={cls.term || "—"} />
       </div>
 
       <Tabs<DetailTab>
@@ -395,75 +417,52 @@ export default function ClassDetailPage() {
 
       {activeTab === "students" ? (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-end justify-between gap-3 rounded-[12px] border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-4">
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="w-[170px]">
-                <FormField id="class-student-sort" label="Sort by">
-                  <SelectInput
-                    id="class-student-sort"
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as StudentSortBy)}
-                  >
-                    <option value="lastName">Last name</option>
-                    <option value="firstName">First name</option>
-                    <option value="studentCode">Student ID</option>
-                  </SelectInput>
-                </FormField>
-              </div>
-              <div className="min-w-[220px]">
-                <FormField id="class-student-search" label="Search">
-                  <TextInput
-                    id="class-student-search"
-                    type="search"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Filter enrolled students…"
-                  />
-                </FormField>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => setPickerOpen(true)}
-                disabled={allStudents.length === 0}
-                disabledReason="No students in directory yet"
+          {showStudentFilters && detail.students.length > 0 && (
+            <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-3.5 py-3">
+              <FormField
+                id="class-student-search"
+                label="Search students"
+                size="sm"
+                className="min-w-[200px] flex-1"
               >
-                Add existing students
-              </Button>
-              <Button variant="primary" onClick={openNewStudentDrawer}>
-                + New student
-              </Button>
+                <TextInput
+                  id="class-student-search"
+                  type="search"
+                  inputSize="sm"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search by name, Student ID, or LRN"
+                />
+              </FormField>
+              <FormField id="class-student-sort" label="Sort by" size="sm">
+                <SelectInput
+                  id="class-student-sort"
+                  selectSize="sm"
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as StudentSortBy)}
+                  className="!w-auto min-w-[140px]"
+                >
+                  <option value="lastName">Last name</option>
+                  <option value="firstName">First name</option>
+                  <option value="studentCode">Student ID</option>
+                </SelectInput>
+              </FormField>
             </div>
-          </div>
+          )}
 
           {detail.students.length === 0 ? (
             <EmptyState
               icon={<UsersIcon />}
-              title={`No students in ${cls.name} yet`}
-              description="Add a new student directly or enroll existing students from the directory."
-              action={
-                <div className="flex flex-wrap justify-center gap-2">
-                  <Button variant="primary" onClick={openNewStudentDrawer}>
-                    + New student
-                  </Button>
-                  {allStudents.length > 0 && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => setPickerOpen(true)}
-                    >
-                      Add existing students
-                    </Button>
-                  )}
-                </div>
-              }
+              title={`No students in ${cls.name}`}
+              description="This class currently has no enrolled students."
+              nextStep={`Select New student above to add a student to ${cls.name}.`}
             />
           ) : filteredStudents.length === 0 ? (
             <EmptyState
               icon={<UsersIcon />}
               title="No matching students"
-              description="Clear the search filter to see enrolled students."
+              description="No enrolled students matched your search."
+              nextStep="Clear the search filter to show enrolled students."
               action={
                 <Button variant="secondary" onClick={() => setSearch("")}>
                   Clear search
@@ -475,24 +474,29 @@ export default function ClassDetailPage() {
               rows={filteredStudents}
               columns={studentColumns}
               rowKey={(stu) => stu.id}
+              actionsHeaderSrOnly
+              onRowClick={(stu) => router.push(`/students/${stu.id}`)}
               renderActions={(stu) => (
-                <>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => openEditStudentDrawer(stu)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => void handleRemoveStudentFromClass(stu)}
-                    disabled={updatingStudentId === stu.id}
-                  >
-                    Remove
-                  </Button>
-                </>
+                <ActionMenu
+                  label={`Actions for ${stu.lastName}, ${stu.firstName}`}
+                  items={[
+                    {
+                      id: "edit",
+                      label: "Edit student",
+                      onClick: () => openEditStudentDrawer(stu),
+                    },
+                    { kind: "divider", id: "div-1" },
+                    {
+                      id: "remove",
+                      label:
+                        updatingStudentId === stu.id
+                          ? "Removing..."
+                          : "Remove from class",
+                      variant: "danger",
+                      onClick: () => void handleRemoveStudentFromClass(stu),
+                    },
+                  ]}
+                />
               )}
             />
           )}
@@ -501,13 +505,11 @@ export default function ClassDetailPage() {
         <EmptyState
           icon={<DocumentIcon />}
           title={`No quizzes assigned to ${cls.name}`}
-          description="Assign this class when creating or editing a quiz on the Quizzes page."
+          description="Quizzes assigned to this class appear here."
+          nextStep="Open Quizzes to create or assign a quiz."
           action={
-            <Link
-              href="/"
-              className="inline-flex rounded-[8px] bg-[var(--brand)] px-3.5 py-2 text-[14px] font-medium text-white hover:bg-[var(--brand-hover)]"
-            >
-              Go to Quizzes
+            <Link href="/">
+              <Button variant="primary">Open quizzes</Button>
             </Link>
           }
         />
@@ -516,35 +518,35 @@ export default function ClassDetailPage() {
           rows={detail.quizzes}
           columns={quizColumns}
           rowKey={(q) => q.id}
+          actionsHeaderSrOnly
+          onRowClick={(q) => router.push(`/quizzes/${q.id}`)}
           renderActions={(q) => (
-            <Link
-              href={`/quizzes/${q.id}`}
-              className="rounded-[8px] border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-subtle)]"
-            >
-              Open quiz
-            </Link>
+            <ActionMenu
+              label={`Actions for ${q.name}`}
+              items={[
+                { id: "open", label: "Open quiz", href: `/quizzes/${q.id}` },
+              ]}
+            />
           )}
         />
       )}
 
       <StudentFormDrawer
         key={
-          editingStudent
-            ? `edit-${editingStudent.id}-${editingStudent.sectionIds.join(",")}`
-            : `new-${cls.id}-${drawerNonce}`
+          drawerOpen
+            ? editingStudent
+              ? `edit-${editingStudent.id}`
+              : `new-${cls.id}-${drawerNonce}`
+            : "student-drawer-closed"
         }
         open={drawerOpen}
         student={editingStudent}
-        sections={allClasses}
-        defaultSectionId={cls.id}
+        classes={allClasses}
+        defaultClassId={cls.id}
         suggestedStudentCode={editingStudent ? "" : suggestedCode}
         onSaved={async () => {
           setDrawerOpen(false);
-          await loadData();
-        }}
-        onDeleted={() => {
-          setDrawerOpen(false);
-          void loadData();
+          await loadClassDetail();
         }}
         onClose={() => setDrawerOpen(false)}
       />
@@ -552,33 +554,33 @@ export default function ClassDetailPage() {
       <AddStudentPickerDialog
         key={pickerOpen ? `picker-${cls.id}-open` : "picker-closed"}
         open={pickerOpen}
-        section={cls}
+        classItem={cls}
         students={allStudents}
         onUpdated={async () => {
           setPickerOpen(false);
-          await loadData();
+          await loadClassDetail();
         }}
-        onCreateNewInSection={() => {
+        onCreateNewInClass={() => {
           setPickerOpen(false);
           openNewStudentDrawer();
         }}
         onClose={() => setPickerOpen(false)}
       />
 
-      <EditSectionDialog
-        key={`edit-cls-${cls.id}-${cls.name}-${cls.term}`}
+      <EditClassDialog
+        key={editClassOpen ? `edit-cls-${cls.id}` : "edit-cls-closed"}
         open={editClassOpen}
-        section={cls}
+        classItem={cls}
         onSaved={async () => {
           setEditClassOpen(false);
-          await loadData();
+          await loadClassDetail();
         }}
         onClose={() => setEditClassOpen(false)}
       />
 
-      <DeleteSectionDialog
+      <DeleteClassDialog
         open={deleteClassOpen}
-        section={cls}
+        classItem={cls}
         onDeleted={async () => {
           setDeleteClassOpen(false);
           router.push("/classes");

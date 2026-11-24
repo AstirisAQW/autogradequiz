@@ -1,26 +1,37 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StudentFormDrawer } from "@/components/roster/StudentFormDrawer";
+import { ActionMenu } from "@/components/ui/ActionMenu";
 import { Button } from "@/components/ui/Button";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
+import { Dialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FormField, SelectInput, TextInput } from "@/components/ui/Field";
-import { UsersIcon } from "@/components/ui/Icons";
+import { UsersIcon, WarningIcon } from "@/components/ui/Icons";
 import { SkeletonRows } from "@/components/ui/Skeleton";
+import { useToast } from "@/components/ui/Toast";
+import { getErrorMessage } from "@/lib/api";
+import { parseRosterCsv } from "@/lib/rosterCsv";
 import {
+  deleteStudent,
   generateUniqueStudentCode,
   getRoster,
-  type SectionWithCount,
+  importStudents,
+  type ClassWithCount,
   type Student,
 } from "@/lib/workspace";
 
 type SortBy = "lastName" | "firstName" | "studentCode";
 
 export default function StudentsPage() {
+  const router = useRouter();
+  const { push: pushToast } = useToast();
+
   const [students, setStudents] = useState<Student[]>([]);
-  const [classes, setClasses] = useState<SectionWithCount[]>([]);
+  const [classes, setClasses] = useState<ClassWithCount[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -33,27 +44,30 @@ export default function StudentsPage() {
   const [suggestedCode, setSuggestedCode] = useState("");
   const [drawerNonce, setDrawerNonce] = useState(0);
 
-  const loadData = useCallback(async () => {
+  const [deleteTarget, setDeleteTarget] = useState<Student | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [importingCsv, setImportingCsv] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const loadStudentsPage = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     let initialClass = "";
     try {
       const params = new URLSearchParams(window.location.search);
-      initialClass = params.get("class_id") ?? params.get("section_id") ?? "";
+      initialClass = params.get("class_id") ?? "";
     } catch {
       initialClass = "";
     }
     try {
       const roster = await getRoster();
       setStudents(roster.students);
-      setClasses(roster.sections);
-      if (initialClass && roster.sections.some((c) => c.id === initialClass)) {
+      setClasses(roster.classes);
+      if (initialClass && roster.classes.some((c) => c.id === initialClass)) {
         setClassFilterId(initialClass);
       }
     } catch (err) {
-      setLoadError(
-        err instanceof Error ? err.message : "Could not load students.",
-      );
+      setLoadError(getErrorMessage(err, "Could not load students."));
     } finally {
       setLoading(false);
     }
@@ -62,12 +76,12 @@ export default function StudentsPage() {
   useEffect(() => {
     let active = true;
     queueMicrotask(() => {
-      if (active) void loadData();
+      if (active) void loadStudentsPage();
     });
     return () => {
       active = false;
     };
-  }, [loadData]);
+  }, [loadStudentsPage]);
 
   const classById = useMemo(
     () => new Map(classes.map((c) => [c.id, c])),
@@ -84,9 +98,9 @@ export default function StudentsPage() {
     return students
       .filter((stu) => {
         if (classFilterId === "unassigned") {
-          if (stu.sectionIds.length > 0) return false;
+          if (stu.classIds.length > 0) return false;
         } else if (classFilterId !== "all") {
-          if (!stu.sectionIds.includes(classFilterId)) return false;
+          if (!stu.classIds.includes(classFilterId)) return false;
         }
         if (!q) return true;
         return (
@@ -96,7 +110,23 @@ export default function StudentsPage() {
           stu.externalRef.toLowerCase().includes(q)
         );
       })
-      .sort((a, b) => a[sortBy].localeCompare(b[sortBy]));
+      .sort(
+        (a, b) =>
+          a[sortBy].localeCompare(b[sortBy], undefined, {
+            numeric: true,
+            sensitivity: "base",
+          }) ||
+          a.lastName.localeCompare(b.lastName, undefined, {
+            sensitivity: "base",
+          }) ||
+          a.firstName.localeCompare(b.firstName, undefined, {
+            sensitivity: "base",
+          }) ||
+          a.studentCode.localeCompare(b.studentCode, undefined, {
+            numeric: true,
+            sensitivity: "base",
+          }),
+      );
   }, [students, classFilterId, search, sortBy]);
 
   function openNewDrawer() {
@@ -112,6 +142,58 @@ export default function StudentsPage() {
     setDrawerOpen(true);
   }
 
+  async function handleConfirmDelete() {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    try {
+      const fullName = `${deleteTarget.lastName}, ${deleteTarget.firstName}`;
+      await deleteStudent(deleteTarget.id);
+      setDeleteTarget(null);
+      await loadStudentsPage();
+      pushToast(`Deleted student "${fullName}".`, "success");
+    } catch (err) {
+      pushToast(getErrorMessage(err, "Could not delete student."), "error");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleCsvImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (importInputRef.current) importInputRef.current.value = "";
+    if (!file || importingCsv) return;
+
+    setImportingCsv(true);
+    try {
+      const text = await file.text();
+      const parsed = parseRosterCsv(text);
+      if (parsed.rows.length === 0) {
+        pushToast(
+          "No valid student rows found. Include Name (or First/Last Name) columns.",
+          "error",
+        );
+        return;
+      }
+
+      const result = await importStudents(parsed.rows);
+      const totalSkipped = parsed.skipped + result.skipped;
+      await loadStudentsPage();
+      pushToast(
+        totalSkipped > 0
+          ? `Imported ${result.imported} ${result.imported === 1 ? "student" : "students"} (${totalSkipped} skipped).`
+          : `Imported ${result.imported} ${result.imported === 1 ? "student" : "students"}.`,
+        "success",
+      );
+    } catch (err) {
+      pushToast(getErrorMessage(err, "Could not import CSV."), "error");
+    } finally {
+      setImportingCsv(false);
+    }
+  }
+
+  const filtersActive = Boolean(search.trim() || classFilterId !== "all");
+  const showFilters = students.length >= 5 || filtersActive;
+
   const columns: DataTableColumn<Student>[] = [
     {
       key: "name",
@@ -119,7 +201,7 @@ export default function StudentsPage() {
       render: (stu) => (
         <Link
           href={`/students/${stu.id}`}
-          className="font-medium text-[var(--text-primary)] hover:text-[var(--brand-text)] hover:underline"
+          className="font-semibold text-[var(--text-primary)] hover:text-[var(--brand-text)] hover:underline"
         >
           {stu.lastName}, {stu.firstName}
         </Link>
@@ -129,138 +211,147 @@ export default function StudentsPage() {
       key: "studentCode",
       header: "Student ID",
       render: (stu) => (
-        <span className="font-mono text-[13px] tabular-nums">
-          {stu.studentCode}
-        </span>
-      ),
-    },
-    {
-      key: "externalRef",
-      header: "External Ref",
-      render: (stu) => (
-        <span className="text-[var(--text-secondary)]">
-          {stu.externalRef || "—"}
-        </span>
+        <span className="tabular-nums">{stu.studentCode}</span>
       ),
     },
     {
       key: "classes",
-      header: "Classes",
+      header: "Class",
       render: (stu) => {
-        const assigned = stu.sectionIds
-          .map((id) => classById.get(id))
-          .filter((c): c is SectionWithCount => c !== undefined);
-        if (assigned.length === 0) {
-          return (
-            <span className="text-[12px] text-[var(--text-muted)]">
-              No class
-            </span>
-          );
-        }
+        const names = stu.classIds
+          .map((id) => classById.get(id)?.name)
+          .filter((name): name is string => Boolean(name))
+          .join(", ");
         return (
-          <div className="flex flex-wrap gap-1">
-            {assigned.map((cls) => (
-              <Link
-                key={cls.id}
-                href={`/classes/${cls.id}`}
-                className="rounded bg-[var(--bg-subtle)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--brand-text)]"
-              >
-                {cls.name}
-              </Link>
-            ))}
-          </div>
+          <span
+            className={
+              names ? "text-[var(--text-primary)]" : "text-[var(--text-muted)]"
+            }
+          >
+            {names || "Unassigned"}
+          </span>
         );
       },
+    },
+    {
+      key: "externalRef",
+      header: "LRN",
+      render: (stu) => (
+        <span className="text-[var(--text-secondary)] tabular-nums">
+          {stu.externalRef || "—"}
+        </span>
+      ),
     },
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1>Students</h1>
-          <p className="mt-0.5 text-[12px] text-[var(--text-muted)]">
-            Student directory with auto-generated 5-digit Student IDs, class
-            enrollments, and graded paper history.
-          </p>
+        <h1>Students</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            onChange={(e) => void handleCsvImport(e)}
+            className="sr-only"
+          />
+          <Button
+            variant="secondary"
+            disabled={importingCsv}
+            onClick={() => importInputRef.current?.click()}
+          >
+            {importingCsv ? "Importing..." : "Import CSV"}
+          </Button>
+          <Button variant="primary" onClick={openNewDrawer}>
+            New student
+          </Button>
         </div>
-
-        <Button variant="primary" onClick={openNewDrawer}>
-          + New student
-        </Button>
       </div>
 
-      {students.length > 0 && (
-        <div className="flex flex-wrap items-end gap-3 rounded-[12px] border border-[var(--border-hairline)] bg-[var(--bg-surface)] p-4">
-          <div className="w-[170px]">
-            <FormField id="students-sort" label="Sort by">
-              <SelectInput
-                id="students-sort"
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as SortBy)}
-              >
-                <option value="lastName">Last name</option>
-                <option value="firstName">First name</option>
-                <option value="studentCode">Student ID</option>
-              </SelectInput>
-            </FormField>
-          </div>
+      {!loading && !loadError && students.length >= 2 && (
+        <p className="text-sm text-[var(--text-primary)] tabular-nums">
+          {students.length} {students.length === 1 ? "student" : "students"} in{" "}
+          {classes.length} {classes.length === 1 ? "class" : "classes"}.
+        </p>
+      )}
 
-          <div className="w-[200px]">
-            <FormField id="students-class-filter" label="Class">
-              <SelectInput
-                id="students-class-filter"
-                value={classFilterId}
-                onChange={(e) => setClassFilterId(e.target.value)}
-              >
-                <option value="all">All classes ({students.length})</option>
-                <option value="unassigned">Unassigned</option>
-                {sortedClasses.map((cls) => (
-                  <option key={cls.id} value={cls.id}>
-                    {cls.name} ({cls.studentCount})
-                  </option>
-                ))}
-              </SelectInput>
-            </FormField>
-          </div>
+      {showFilters && students.length > 0 && (
+        <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-3.5 py-3">
+          <FormField
+            id="students-search"
+            label="Search students"
+            size="sm"
+            className="min-w-[200px] flex-1"
+          >
+            <TextInput
+              id="students-search"
+              type="search"
+              inputSize="sm"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name, Student ID, or LRN"
+            />
+          </FormField>
 
-          <div className="min-w-[220px] flex-1">
-            <FormField id="students-search" label="Search">
-              <TextInput
-                id="students-search"
-                type="search"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name, Student ID, or ref…"
-              />
-            </FormField>
-          </div>
+          <FormField id="students-class-filter" label="Class" size="sm">
+            <SelectInput
+              id="students-class-filter"
+              selectSize="sm"
+              value={classFilterId}
+              onChange={(e) => setClassFilterId(e.target.value)}
+              className="!w-auto min-w-[150px]"
+            >
+              <option value="all">All classes ({students.length})</option>
+              <option value="unassigned">Unassigned</option>
+              {sortedClasses.map((cls) => (
+                <option key={cls.id} value={cls.id}>
+                  {cls.name} ({cls.studentCount})
+                </option>
+              ))}
+            </SelectInput>
+          </FormField>
+
+          <FormField id="students-sort" label="Sort by" size="sm">
+            <SelectInput
+              id="students-sort"
+              selectSize="sm"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortBy)}
+              className="!w-auto min-w-[130px]"
+            >
+              <option value="lastName">Last name</option>
+              <option value="firstName">First name</option>
+              <option value="studentCode">Student ID</option>
+            </SelectInput>
+          </FormField>
         </div>
       )}
 
       {loadError ? (
-        <div className="rounded-[12px] border border-red-300 bg-[var(--danger-bg)] p-4 text-[14px] text-[var(--danger-text)]">
-          <p className="font-medium">Could not load students</p>
-          <p className="mt-1">{loadError}</p>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void loadData()}
-            className="mt-3"
-          >
-            Retry
-          </Button>
-        </div>
+        <EmptyState
+          tone="error"
+          icon={<WarningIcon />}
+          title="Could not load students"
+          description={loadError}
+          nextStep="Make sure the backend is running, then select Try again."
+          action={
+            <Button variant="primary" onClick={() => void loadStudentsPage()}>
+              Try again
+            </Button>
+          }
+        />
       ) : loading ? (
         <SkeletonRows rows={5} />
       ) : students.length === 0 ? (
         <EmptyState
           icon={<UsersIcon />}
           title="No students yet"
-          description="Add students here to link scanned answer sheets by name or Student ID."
+          description="Add students so uploaded papers link automatically by Student ID."
+          nextStep="Select New student above to add your first student."
           action={
             <Button variant="primary" onClick={openNewDrawer}>
-              + New student
+              New student
             </Button>
           }
         />
@@ -268,7 +359,8 @@ export default function StudentsPage() {
         <EmptyState
           icon={<UsersIcon />}
           title="No matching students"
-          description="Try clearing the search query or switching the class filter."
+          description="No student records matched your current search or class filter."
+          nextStep={`Clear your filters to show all ${students.length} students.`}
           action={
             <Button
               variant="secondary"
@@ -277,7 +369,7 @@ export default function StudentsPage() {
                 setClassFilterId("all");
               }}
             >
-              Reset filters
+              Clear filters
             </Button>
           }
         />
@@ -286,36 +378,47 @@ export default function StudentsPage() {
           rows={filteredStudents}
           columns={columns}
           rowKey={(stu) => stu.id}
+          actionsHeaderSrOnly
+          onRowClick={(stu) => router.push(`/students/${stu.id}`)}
           renderActions={(stu) => (
-            <>
-              <Link
-                href={`/students/${stu.id}`}
-                className="rounded-[8px] border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-subtle)]"
-              >
-                View
-              </Link>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => openEditDrawer(stu)}
-              >
-                Edit
-              </Button>
-            </>
+            <ActionMenu
+              label={`Actions for ${stu.lastName}, ${stu.firstName}`}
+              items={[
+                {
+                  id: "open",
+                  label: "Open profile",
+                  href: `/students/${stu.id}`,
+                },
+                {
+                  id: "edit",
+                  label: "Edit student",
+                  onClick: () => openEditDrawer(stu),
+                },
+                { kind: "divider", id: "div-1" },
+                {
+                  id: "delete",
+                  label: "Delete student",
+                  variant: "danger",
+                  onClick: () => setDeleteTarget(stu),
+                },
+              ]}
+            />
           )}
         />
       )}
 
       <StudentFormDrawer
         key={
-          editing
-            ? `edit-${editing.id}-${editing.sectionIds.join(",")}`
-            : `new-${drawerNonce}`
+          drawerOpen
+            ? editing
+              ? `edit-${editing.id}`
+              : `new-${drawerNonce}`
+            : "student-drawer-closed"
         }
         open={drawerOpen}
         student={editing}
-        sections={classes}
-        defaultSectionId={
+        classes={classes}
+        defaultClassId={
           classFilterId !== "all" && classFilterId !== "unassigned"
             ? classFilterId
             : ""
@@ -323,13 +426,20 @@ export default function StudentsPage() {
         suggestedStudentCode={editing ? "" : suggestedCode}
         onSaved={async () => {
           setDrawerOpen(false);
-          await loadData();
-        }}
-        onDeleted={() => {
-          setDrawerOpen(false);
-          void loadData();
+          await loadStudentsPage();
         }}
         onClose={() => setDrawerOpen(false)}
+      />
+
+      <Dialog
+        open={deleteTarget !== null}
+        title={`Delete student "${deleteTarget?.lastName ?? ""}, ${deleteTarget?.firstName ?? ""}"?`}
+        description="Removes this student from the directory and unlinks their graded papers."
+        confirmLabel="Delete student"
+        confirmVariant="danger"
+        busy={deleting}
+        onConfirm={() => void handleConfirmDelete()}
+        onClose={() => setDeleteTarget(null)}
       />
     </div>
   );

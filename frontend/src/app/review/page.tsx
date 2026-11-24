@@ -6,18 +6,21 @@ import { ReviewIdentityBar } from "@/components/review/ReviewIdentityBar";
 import { ScanPreviewPane } from "@/components/review/ScanPreviewPane";
 import { ShortcutsDialog } from "@/components/review/ShortcutsDialog";
 import { Badge } from "@/components/ui/Badge";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SelectInput } from "@/components/ui/Field";
 import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  WarningIcon,
 } from "@/components/ui/Icons";
 import { SkeletonRows } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
-import { shortId } from "@/lib/format";
-import { formatPointsValue } from "@/lib/scoring";
+import { getErrorMessage } from "@/lib/api";
+import { formatPointsValue, scorePaper } from "@/lib/scoring";
 import { questionRegionPercent, rowCropAspect } from "@/lib/sheetGeometry";
 import { ANSWER_CHOICES, type CorrectionValue } from "@/lib/types";
 import {
@@ -35,13 +38,33 @@ interface FlaggedQuestion {
   number: number;
   reason: string;
   readValue: string;
-  singleChoice: CorrectionValue | undefined;
 }
 
 function mergeUpdatedPaperIntoQueueItem(
   item: ReviewQueueItem,
   updated: Paper,
 ): ReviewQueueItem {
+  if (
+    item.answerKey.length > 0 &&
+    updated.answers.length === item.answerKey.length
+  ) {
+    const rescored = scorePaper({
+      answerKey: item.answerKey,
+      points:
+        item.points?.length === item.answerKey.length ? item.points : undefined,
+      questionRules: item.questionRules,
+      keyVersionFlagged: updated.keyVersionFlagged,
+      answers: updated.answers,
+      flags: updated.flags,
+      corrections: updated.corrections,
+    });
+    return {
+      ...item,
+      ...updated,
+      earnedPoints: rescored.earnedPoints,
+      totalPoints: rescored.totalPoints,
+    };
+  }
   const earnedPoints =
     item.totalPoints > 0
       ? Math.round((updated.score / 100) * item.totalPoints * 100) / 100
@@ -53,53 +76,44 @@ function mergeUpdatedPaperIntoQueueItem(
   };
 }
 
-function getFlaggedQuestions(scan: ReviewQueueItem): FlaggedQuestion[] {
+function getFlaggedQuestions(paper: ReviewQueueItem): FlaggedQuestion[] {
   const items: FlaggedQuestion[] = [];
-  for (const [key, flagReason] of Object.entries(scan.flags)) {
+  for (const [key, flagReason] of Object.entries(paper.flags)) {
     const num = Number(key);
     if (!Number.isInteger(num) || num < 1) continue;
-    const raw = scan.answers[num - 1] ?? "";
+    const raw = paper.answers[num - 1] ?? "";
     if (flagReason === "ambiguous") {
-      const singleChoice = ANSWER_CHOICES.includes(
-        raw as (typeof ANSWER_CHOICES)[number],
-      )
-        ? (raw as CorrectionValue)
-        : undefined;
       items.push({
         number: num,
         reason: "Unclear mark",
         readValue: raw || "blank",
-        singleChoice,
       });
     } else if (flagReason === "multiple") {
       items.push({
         number: num,
         reason: `Two marks: ${raw || "?"}`,
         readValue: raw || "blank",
-        singleChoice: undefined,
       });
     }
   }
   return items.sort((a, b) => a.number - b.number);
 }
 
-function initialDraftsForScan(
-  scan: ReviewQueueItem | null,
+function initialDraftsForPaper(
+  paper: ReviewQueueItem | null,
 ): Record<number, CorrectionValue> {
-  if (!scan) return {};
-  const flagged = getFlaggedQuestions(scan);
+  if (!paper) return {};
+  const flagged = getFlaggedQuestions(paper);
   const drafts: Record<number, CorrectionValue> = {};
 
   for (const q of flagged) {
-    const saved = scan.corrections[q.number];
+    const saved = paper.corrections[q.number];
     if (
       saved !== undefined &&
       (saved === "" ||
         ANSWER_CHOICES.includes(saved as (typeof ANSWER_CHOICES)[number]))
     ) {
       drafts[q.number] = saved as CorrectionValue;
-    } else if (q.singleChoice !== undefined) {
-      drafts[q.number] = q.singleChoice;
     }
   }
   return drafts;
@@ -112,53 +126,79 @@ export default function ReviewPage() {
   const [queueError, setQueueError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusedQuestion, setFocusedQuestion] = useState<number | null>(null);
+  const [slideDir, setSlideDir] = useState<"next" | "prev" | "">("");
 
-  const [draftCorrections, setDraftCorrections] = useState<
-    Record<number, CorrectionValue>
+  const [scopeQuizId, setScopeQuizId] = useState<string | null>(null);
+  const [scopeQuizName, setScopeQuizName] = useState<string | null>(null);
+
+  const [draftsByPaperId, setDraftsByPaperId] = useState<
+    Record<string, Record<number, CorrectionValue>>
   >({});
   const [students, setStudents] = useState<Student[]>([]);
   const [savingCorrections, setSavingCorrections] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [imageLoading, setImageLoading] = useState(false);
   const [imageRetryCount, setImageRetryCount] = useState(0);
 
-  const selectScan = useCallback((scan: ReviewQueueItem | null) => {
-    setSelectedId(scan?.id ?? null);
-    setDraftCorrections(initialDraftsForScan(scan));
-    const flagged = scan ? getFlaggedQuestions(scan) : [];
-    setFocusedQuestion(flagged[0]?.number ?? null);
+  const selectPaper = useCallback(
+    (paper: ReviewQueueItem | null, dir: "next" | "prev" | "" = "") => {
+      setSlideDir(dir);
+      setSelectedId(paper?.id ?? null);
+      const flagged = paper ? getFlaggedQuestions(paper) : [];
+      setFocusedQuestion(flagged[0]?.number ?? null);
+    },
+    [],
+  );
+
+  const clearPaperDraft = useCallback((paperId: string) => {
+    setDraftsByPaperId((prev) => {
+      if (!(paperId in prev)) return prev;
+      const next = { ...prev };
+      delete next[paperId];
+      return next;
+    });
   }, []);
 
-  const refreshQueue = useCallback(
-    async (preferredId: string | null = null) => {
+  const loadReviewQueue = useCallback(
+    async (
+      preferredId: string | null = null,
+      quizFilter: string | null = null,
+      preserveDrafts = false,
+    ) => {
       setLoading(true);
       setQueueError(null);
       try {
-        const [data, roster] = await Promise.all([
+        const [rawData, roster] = await Promise.all([
           getReviewQueue(),
           getRoster(),
         ]);
-        setQueue(data);
+        const filtered = quizFilter
+          ? rawData.filter((item) => item.quizId === quizFilter)
+          : rawData;
+        if (quizFilter && filtered[0]?.quizName) {
+          setScopeQuizName(filtered[0].quizName);
+        }
+        if (!preserveDrafts) {
+          setDraftsByPaperId({});
+        }
+        setQueue(filtered);
         setStudents(roster.students);
         const next =
           (preferredId !== null
-            ? data.find((item) => item.id === preferredId)
+            ? filtered.find((item) => item.id === preferredId)
             : undefined) ??
-          data[0] ??
+          filtered[0] ??
           null;
-        selectScan(next);
+        selectPaper(next, "");
       } catch (err) {
         setQueue([]);
-        selectScan(null);
-        setQueueError(
-          err instanceof Error ? err.message : "Could not load review queue.",
-        );
+        setDraftsByPaperId({});
+        selectPaper(null, "");
+        setQueueError(getErrorMessage(err, "Could not load review queue."));
       } finally {
         setLoading(false);
       }
     },
-    [selectScan],
+    [selectPaper],
   );
 
   useEffect(() => {
@@ -166,84 +206,79 @@ export default function ReviewPage() {
     queueMicrotask(() => {
       if (!active) return;
       let initialPaperId: string | null = null;
+      let initialQuizId: string | null = null;
       try {
-        initialPaperId = new URLSearchParams(window.location.search).get(
-          "paper_id",
-        );
+        const params = new URLSearchParams(window.location.search);
+        initialPaperId = params.get("paper_id");
+        initialQuizId = params.get("quiz_id");
       } catch {
         initialPaperId = null;
+        initialQuizId = null;
       }
-      void refreshQueue(initialPaperId);
+      setScopeQuizId(initialQuizId);
+      void loadReviewQueue(initialPaperId, initialQuizId);
     });
     return () => {
       active = false;
     };
-  }, [refreshQueue]);
+  }, [loadReviewQueue]);
 
-  const selectedScan = useMemo(
+  const selectedPaper = useMemo(
     () => queue.find((item) => item.id === selectedId) ?? null,
     [queue, selectedId],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    let currentUrl: string | null = null;
-    const paperId = selectedScan?.id ?? null;
-
-    if (!paperId) {
-      queueMicrotask(() => {
-        if (!cancelled) {
-          setImageUrl(null);
-          setImageLoading(false);
-        }
-      });
-      return;
-    }
-
-    queueMicrotask(() => {
-      if (!cancelled) setImageLoading(true);
-    });
-
-    getPaperImageUrl(paperId)
-      .then((url) => {
-        if (cancelled) {
-          if (url) URL.revokeObjectURL(url);
-          return;
-        }
-        currentUrl = url;
-        setImageUrl(url);
-      })
-      .catch(() => {
-        if (!cancelled) setImageUrl(null);
-      })
-      .finally(() => {
-        if (!cancelled) setImageLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-      if (currentUrl) URL.revokeObjectURL(currentUrl);
-    };
-  }, [selectedScan?.id, imageRetryCount]);
+  const imageUrl = useMemo(() => {
+    if (!selectedPaper) return null;
+    return getPaperImageUrl(
+      selectedPaper.quizId,
+      selectedPaper.id,
+      "aligned",
+      `${imageRetryCount}-${selectedPaper.studentId ?? ""}-${selectedPaper.nameText}-${selectedPaper.keyVersion ?? ""}`,
+    );
+  }, [selectedPaper, imageRetryCount]);
 
   const selectedIndex = useMemo(
     () =>
-      selectedScan
-        ? queue.findIndex((item) => item.id === selectedScan.id)
+      selectedPaper
+        ? queue.findIndex((item) => item.id === selectedPaper.id)
         : -1,
-    [queue, selectedScan],
+    [queue, selectedPaper],
   );
-  const prevScan = selectedIndex > 0 ? queue[selectedIndex - 1] : null;
-  const nextScan =
+  const prevPaper = selectedIndex > 0 ? queue[selectedIndex - 1] : null;
+  const nextPaper =
     selectedIndex >= 0 && selectedIndex < queue.length - 1
       ? queue[selectedIndex + 1]
       : null;
 
   const flaggedQuestions = useMemo(
-    () => (selectedScan ? getFlaggedQuestions(selectedScan) : []),
-    [selectedScan],
+    () => (selectedPaper ? getFlaggedQuestions(selectedPaper) : []),
+    [selectedPaper],
   );
-  const hasGradedAnswers = (selectedScan?.answers.length ?? 0) > 0;
+  const draftCorrections = useMemo(
+    () =>
+      selectedPaper
+        ? (draftsByPaperId[selectedPaper.id] ??
+          initialDraftsForPaper(selectedPaper))
+        : {},
+    [selectedPaper, draftsByPaperId],
+  );
+  const updateSelectedDrafts = useCallback(
+    (
+      updater: (
+        prev: Record<number, CorrectionValue>,
+      ) => Record<number, CorrectionValue>,
+    ) => {
+      if (!selectedPaper) return;
+      const paperId = selectedPaper.id;
+      setDraftsByPaperId((prev) => ({
+        ...prev,
+        [paperId]: updater(prev[paperId] ?? initialDraftsForPaper(selectedPaper)),
+      }));
+    },
+    [selectedPaper],
+  );
+  const hasGradedAnswers = (selectedPaper?.answers.length ?? 0) > 0;
 
   const answeredCount = flaggedQuestions.filter(
     (q) => draftCorrections[q.number] !== undefined,
@@ -255,7 +290,7 @@ export default function ReviewPage() {
     remainingCount === 0;
 
   const handleSaveAndNext = useCallback(async () => {
-    if (!selectedScan || !allFlaggedChosen || savingCorrections) return;
+    if (!selectedPaper || !allFlaggedChosen || savingCorrections) return;
 
     const corrections: Record<number, string> = {};
     for (const q of flaggedQuestions) {
@@ -264,50 +299,56 @@ export default function ReviewPage() {
 
     setSavingCorrections(true);
     try {
-      const updated = await submitReview(selectedScan.id, { corrections });
+      const updated = await submitReview(selectedPaper.quizId, selectedPaper.id, {
+        corrections,
+      });
       const remainingQueue = updated.needsReview
         ? queue.map((item) =>
             item.id === updated.id
               ? mergeUpdatedPaperIntoQueueItem(item, updated)
               : item,
           )
-        : queue.filter((item) => item.id !== selectedScan.id);
+        : queue.filter((item) => item.id !== selectedPaper.id);
 
+      clearPaperDraft(selectedPaper.id);
       setQueue(remainingQueue);
       const nextTarget =
         remainingQueue[
           Math.min(selectedIndex, Math.max(0, remainingQueue.length - 1))
         ] ?? null;
-      selectScan(nextTarget);
+      selectPaper(nextTarget, "next");
+      const paperLabel =
+        updated.nameText || selectedPaper.nameText || "Unnamed paper";
       pushToast(
-        `Saved Scan #${shortId(updated.id)} (${updated.score.toFixed(1)}%).`,
+        `Saved review for ${paperLabel} (${updated.score.toFixed(1)}%).`,
         "success",
       );
     } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Could not save corrections.",
-        "error",
-      );
+      pushToast(getErrorMessage(err, "Could not save corrections."), "error");
     } finally {
       setSavingCorrections(false);
     }
   }, [
-    selectedScan,
+    selectedPaper,
     allFlaggedChosen,
     savingCorrections,
     flaggedQuestions,
     draftCorrections,
     queue,
     selectedIndex,
-    selectScan,
+    clearPaperDraft,
+    selectPaper,
     pushToast,
   ]);
 
   useEffect(() => {
-    if (!selectedScan) return;
+    if (!selectedPaper) return;
 
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
+      if (target?.closest('[role="dialog"]')) {
+        return;
+      }
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
         return;
@@ -318,14 +359,14 @@ export default function ReviewPage() {
         setShortcutsOpen((v) => !v);
         return;
       }
-      if (e.key === "ArrowLeft" && prevScan) {
+      if (e.key === "ArrowLeft" && prevPaper) {
         e.preventDefault();
-        selectScan(prevScan);
+        selectPaper(prevPaper, "prev");
         return;
       }
-      if (e.key === "ArrowRight" && nextScan) {
+      if (e.key === "ArrowRight" && nextPaper) {
         e.preventDefault();
-        selectScan(nextScan);
+        selectPaper(nextPaper, "next");
         return;
       }
       if (e.key === "ArrowUp" && flaggedQuestions.length > 0) {
@@ -348,6 +389,9 @@ export default function ReviewPage() {
         return;
       }
       if (e.key === "Enter" && allFlaggedChosen) {
+        if (target?.closest('button, a, [role="menuitem"]')) {
+          return;
+        }
         e.preventDefault();
         void handleSaveAndNext();
         return;
@@ -364,58 +408,67 @@ export default function ReviewPage() {
         !e.altKey
       ) {
         e.preventDefault();
-        setDraftCorrections((prev) => ({
+        updateSelectedDrafts((prev) => ({
           ...prev,
           [activeQ]: upper as CorrectionValue,
         }));
       } else if (e.key === "Backspace") {
         e.preventDefault();
-        setDraftCorrections((prev) => ({ ...prev, [activeQ]: "" }));
+        updateSelectedDrafts((prev) => ({ ...prev, [activeQ]: "" }));
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
-    selectedScan,
-    prevScan,
-    nextScan,
-    selectScan,
+    selectedPaper,
+    prevPaper,
+    nextPaper,
+    selectPaper,
     flaggedQuestions,
     focusedQuestion,
     allFlaggedChosen,
     handleSaveAndNext,
+    updateSelectedDrafts,
   ]);
 
   const handleConfirmKeyVersion = useCallback(
     async (version: KeyVersionId) => {
-      if (!selectedScan || savingCorrections) return;
+      if (!selectedPaper || savingCorrections) return;
       setSavingCorrections(true);
       try {
-        const updated = await submitReview(selectedScan.id, {
-          keyVersion: version,
-        });
+        const updated = await submitReview(
+          selectedPaper.quizId,
+          selectedPaper.id,
+          { keyVersion: version },
+        );
         if (!updated.needsReview) {
+          clearPaperDraft(selectedPaper.id);
           const remainingQueue = queue.filter(
-            (item) => item.id !== selectedScan.id,
+            (item) => item.id !== selectedPaper.id,
           );
           setQueue(remainingQueue);
           const nextTarget =
             remainingQueue[
               Math.min(selectedIndex, Math.max(0, remainingQueue.length - 1))
             ] ?? null;
-          selectScan(nextTarget);
+          selectPaper(nextTarget, "next");
+          const paperLabel =
+            updated.nameText || selectedPaper.nameText || "Unnamed paper";
           pushToast(
-            `Confirmed Key ${version} for Scan #${shortId(updated.id)} (${updated.score.toFixed(1)}%).`,
+            `Confirmed Key ${version} for ${paperLabel} (${updated.score.toFixed(1)}%).`,
             "success",
           );
         } else {
-          await refreshQueue(updated.id);
-          pushToast(`Selected Key ${version}. Finish resolving flagged marks.`, "info");
+          await loadReviewQueue(updated.id, scopeQuizId, true);
+          pushToast(
+            `Selected Key ${version}. Finish resolving flagged marks.`,
+            "info",
+          );
         }
       } catch (err) {
         pushToast(
-          err instanceof Error ? err.message : "Could not update key version.",
+          getErrorMessage(err, "Could not update key version."),
           "error",
         );
       } finally {
@@ -423,134 +476,143 @@ export default function ReviewPage() {
       }
     },
     [
-      selectedScan,
+      selectedPaper,
       savingCorrections,
       queue,
       selectedIndex,
-      selectScan,
-      refreshQueue,
+      clearPaperDraft,
+      selectPaper,
+      loadReviewQueue,
+      scopeQuizId,
       pushToast,
     ],
   );
 
   const handleConfirmBlankSheet = useCallback(async () => {
-    if (!selectedScan || savingCorrections) return;
+    if (!selectedPaper || savingCorrections) return;
     setSavingCorrections(true);
     try {
-      const updated = await submitReview(selectedScan.id, {
+      const updated = await submitReview(selectedPaper.quizId, selectedPaper.id, {
         corrections: { 1: "" },
       });
+      clearPaperDraft(selectedPaper.id);
       const remainingQueue = updated.needsReview
         ? queue.map((item) =>
             item.id === updated.id
               ? mergeUpdatedPaperIntoQueueItem(item, updated)
               : item,
           )
-        : queue.filter((item) => item.id !== selectedScan.id);
+        : queue.filter((item) => item.id !== selectedPaper.id);
       setQueue(remainingQueue);
       const nextTarget =
         remainingQueue[
           Math.min(selectedIndex, Math.max(0, remainingQueue.length - 1))
         ] ?? null;
-      selectScan(nextTarget);
+      selectPaper(nextTarget, "next");
+      const paperLabel =
+        updated.nameText || selectedPaper.nameText || "Unnamed paper";
       pushToast(
-        `Confirmed blank sheet #${shortId(updated.id)} (${updated.score.toFixed(1)}%).`,
+        `Confirmed blank sheet for ${paperLabel} (${updated.score.toFixed(1)}%).`,
         "success",
       );
     } catch (err) {
       pushToast(
-        err instanceof Error ? err.message : "Could not confirm blank sheet.",
+        getErrorMessage(err, "Could not confirm blank sheet."),
         "error",
       );
     } finally {
       setSavingCorrections(false);
     }
   }, [
-    selectedScan,
+    selectedPaper,
     savingCorrections,
     queue,
     selectedIndex,
-    selectScan,
+    clearPaperDraft,
+    selectPaper,
     pushToast,
   ]);
 
+  const liveScore = useMemo(() => {
+    if (!selectedPaper) return null;
+    if (
+      selectedPaper.answerKey.length > 0 &&
+      selectedPaper.answers.length === selectedPaper.answerKey.length
+    ) {
+      return scorePaper({
+        answerKey: selectedPaper.answerKey,
+        points:
+          selectedPaper.points?.length === selectedPaper.answerKey.length
+            ? selectedPaper.points
+            : undefined,
+        questionRules: selectedPaper.questionRules,
+        keyVersionFlagged: selectedPaper.keyVersionFlagged,
+        answers: selectedPaper.answers,
+        flags: selectedPaper.flags,
+        corrections: {
+          ...selectedPaper.corrections,
+          ...draftCorrections,
+        },
+      });
+    }
+    return {
+      earnedPoints: selectedPaper.earnedPoints,
+      totalPoints: selectedPaper.totalPoints,
+      score: selectedPaper.score,
+    };
+  }, [selectedPaper, draftCorrections]);
+
   const highlightBox =
-    focusedQuestion !== null && selectedScan
+    focusedQuestion !== null && selectedPaper
       ? questionRegionPercent(
           focusedQuestion,
-          selectedScan.answers.length || 20,
+          selectedPaper.answers.length || 20,
         )
       : null;
 
-  const liveAnnouncement = selectedScan
-    ? `Reviewing Scan ${shortId(selectedScan.id)}, ${selectedScan.quizName || "Quiz"}, Provisional score ${formatPointsValue(selectedScan.earnedPoints)} of ${formatPointsValue(selectedScan.totalPoints)} points (${selectedScan.score.toFixed(1)}%). ${focusedQuestion !== null ? `Focused on Question ${focusedQuestion}.` : ""}`
+  const displayedEarnedPoints =
+    liveScore?.earnedPoints ?? selectedPaper?.earnedPoints ?? 0;
+  const displayedTotalPoints =
+    liveScore?.totalPoints ?? selectedPaper?.totalPoints ?? 0;
+  const displayedScorePct = liveScore?.score ?? selectedPaper?.score ?? 0;
+
+  const liveAnnouncement = selectedPaper
+    ? `Reviewing ${selectedPaper.nameText || "Unnamed paper"}, ${selectedPaper.quizName || "Quiz"}, Provisional score ${formatPointsValue(displayedEarnedPoints)} of ${formatPointsValue(displayedTotalPoints)} points (${displayedScorePct.toFixed(1)}%). ${focusedQuestion !== null ? `Focused on Question ${focusedQuestion}.` : ""}`
     : "";
 
+  const activeQuizName = scopeQuizName ?? selectedPaper?.quizName ?? null;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div aria-live="polite" className="sr-only">
         {liveAnnouncement}
       </div>
 
-      <div className="space-y-2">
-        <nav
-          aria-label="Breadcrumb"
-          className="flex flex-wrap items-center gap-2 text-[13px]"
-        >
-          <Link
-            href="/"
-            className="font-medium text-[var(--text-secondary)] hover:text-[var(--brand-text)] hover:underline"
-          >
-            ← All quizzes
-          </Link>
-          <span className="text-[var(--text-muted)]">/</span>
-          <span className="font-medium text-[var(--text-primary)]">
-            Review queue
-          </span>
-          {selectedScan?.quizName && (
-            <>
-              <span className="text-[var(--text-muted)]">/</span>
-              {selectedScan.quizId ? (
-                <Link
-                  href={`/quizzes/${selectedScan.quizId}`}
-                  className="font-medium text-[var(--text-secondary)] hover:text-[var(--brand-text)] hover:underline"
-                >
-                  {selectedScan.quizName}
-                </Link>
-              ) : (
-                <span className="text-[var(--text-secondary)]">
-                  {selectedScan.quizName}
-                </span>
-              )}
-            </>
-          )}
-        </nav>
-
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1>Review queue</h1>
-            <p className="mt-0.5 text-[12px] text-[var(--text-muted)]">
-              Only flagged questions can be corrected here. Scores are
-              provisional until all flagged marks are resolved.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+      <div>
+        {scopeQuizId && (
+          <Breadcrumb
+            items={[
+              { label: "Quizzes", href: "/" },
+              { label: activeQuizName || "Quiz", href: `/quizzes/${scopeQuizId}` },
+              { label: "Review papers" },
+            ]}
+          />
+        )}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1>Review papers</h1>
+          <div className="flex flex-wrap items-center gap-3">
+            {!loading && queue.length > 1 && (
+              <span className="text-xs font-medium text-[var(--text-secondary)] tabular-nums">
+                Paper {selectedIndex + 1} of {queue.length}
+              </span>
+            )}
             <Button
               variant="secondary"
               size="sm"
               aria-label="Keyboard shortcuts reference"
               onClick={() => setShortcutsOpen(true)}
             >
-              Keyboard shortcuts (?)
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void refreshQueue(selectedId)}
-              disabled={loading}
-              disabledReason={loading ? "Refreshing review queue" : undefined}
-            >
-              {loading ? "Refreshing…" : "Refresh"}
+              Keyboard shortcuts
             </Button>
           </div>
         </div>
@@ -560,156 +622,162 @@ export default function ReviewPage() {
         <SkeletonRows rows={6} />
       ) : queueError ? (
         <EmptyState
-          icon={<CheckIcon />}
+          tone="error"
+          icon={<WarningIcon />}
           title="Could not load review queue"
           description={queueError}
+          nextStep="Check that the backend server is running, then select Try again."
           action={
             <Button
               variant="primary"
-              onClick={() => void refreshQueue(selectedId)}
+              onClick={() => void loadReviewQueue(selectedId, scopeQuizId)}
             >
-              Retry
+              Try again
             </Button>
           }
         />
       ) : queue.length === 0 ? (
         <EmptyState
           icon={<CheckIcon />}
-          title="No papers need review"
-          description="All graded papers are clear. New flagged sheets will appear here automatically."
+          title={
+            scopeQuizId
+              ? `All papers in ${scopeQuizName || "this quiz"} are reviewed`
+              : "All papers are reviewed"
+          }
+          description="No flagged marks or provisional scores remain."
+          nextStep={
+            scopeQuizId
+              ? "Return to the quiz to inspect final scores or export grades."
+              : "Return to Quizzes to view confirmed scores or upload new papers."
+          }
+          action={
+            <Link href={scopeQuizId ? `/quizzes/${scopeQuizId}` : "/"}>
+              <Button variant="primary">
+                {scopeQuizId
+                  ? `Back to ${scopeQuizName || "quiz"}`
+                  : "Open quizzes"}
+              </Button>
+            </Link>
+          }
         />
       ) : (
         <div className="space-y-4">
-          <div className="lg:hidden">
-            <label
-              htmlFor="mobile-queue-select"
-              className="block text-[12px] font-medium text-[var(--text-secondary)]"
-            >
-              Select paper ({queue.length} in queue)
-            </label>
-            <select
-              id="mobile-queue-select"
-              value={selectedId ?? ""}
-              onChange={(e) => {
-                const target =
-                  queue.find((q) => q.id === e.target.value) ?? null;
-                selectScan(target);
-              }}
-              className="mt-1 w-full rounded-[8px] border border-[var(--border-strong)] bg-[var(--bg-surface)] px-3 py-2 text-[14px] text-[var(--text-primary)] focus:border-[var(--brand)] focus:outline-none"
-            >
-              {queue.map((item) => {
-                const count = getFlaggedQuestions(item).length;
-                const labelName =
-                  item.quizName || item.nameText || "Unnamed";
-                return (
-                  <option key={item.id} value={item.id}>
-                    #{shortId(item.id)} ·{" "}
-                    {formatPointsValue(item.earnedPoints)}/
-                    {formatPointsValue(item.totalPoints)} pts (
-                    {item.score.toFixed(1)}% Provisional) · {labelName} ({count}{" "}
-                    flagged)
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-
-          <div className="grid gap-6 lg:grid-cols-[200px_1fr]">
-            <aside className="hidden lg:block">
-              <ul className="divide-y divide-[var(--border-hairline)] overflow-hidden rounded-[12px] border border-[var(--border-hairline)] bg-[var(--bg-surface)]">
+          {queue.length > 1 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-3.5 py-2.5">
+              <Button
+                variant="secondary"
+                size="sm"
+                inlineReason={false}
+                disabled={selectedIndex <= 0}
+                onClick={() => {
+                  if (selectedIndex > 0) {
+                    selectPaper(queue[selectedIndex - 1], "prev");
+                  }
+                }}
+                aria-label="Previous paper"
+              >
+                <ChevronLeftIcon />
+                Prev
+              </Button>
+              <SelectInput
+                id="queue-paper-select"
+                aria-label={`Select paper (${queue.length} in queue)`}
+                selectSize="sm"
+                value={selectedId ?? ""}
+                onChange={(e) => {
+                  const targetIdx = queue.findIndex(
+                    (q) => q.id === e.target.value,
+                  );
+                  const target = targetIdx >= 0 ? queue[targetIdx] : null;
+                  const dir =
+                    targetIdx > selectedIndex
+                      ? "next"
+                      : targetIdx < selectedIndex
+                        ? "prev"
+                        : "";
+                  selectPaper(target, dir);
+                }}
+                className="min-w-[200px] flex-1"
+              >
                 {queue.map((item) => {
                   const count = getFlaggedQuestions(item).length;
-                  const isSelected = item.id === selectedId;
-                  const displayTitle =
-                    item.quizName || item.nameText || "Unnamed";
+                  const labelName =
+                    item.nameText || item.quizName || "Unnamed paper";
                   return (
-                    <li key={item.id}>
-                      <button
-                        type="button"
-                        onClick={() => selectScan(item)}
-                        className={`w-full border-l-[3px] px-3.5 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--brand)] ${
-                          isSelected
-                            ? "border-l-[var(--brand)] bg-[var(--bg-subtle)] text-[var(--text-primary)]"
-                            : "border-l-transparent bg-[var(--bg-surface)] text-[var(--text-primary)] hover:bg-[var(--bg-subtle)]/50"
-                        }`}
-                      >
-                        <p className="font-mono text-[12px] font-medium text-[var(--text-secondary)] tabular-nums">
-                          #{shortId(item.id)} ·{" "}
-                          {formatPointsValue(item.earnedPoints)}/
-                          {formatPointsValue(item.totalPoints)} pts (
-                          {item.score.toFixed(1)}%)
-                        </p>
-                        <p className="mt-0.5 truncate text-[14px] font-medium">
-                          {displayTitle}
-                        </p>
-                        <p className="mt-0.5 text-[12px] text-[var(--text-muted)]">
-                          {count} flagged
-                        </p>
-                      </button>
-                    </li>
+                    <option key={item.id} value={item.id}>
+                      {labelName} ({count} flagged,{" "}
+                      {formatPointsValue(item.earnedPoints)} /{" "}
+                      {formatPointsValue(item.totalPoints)} pts)
+                    </option>
                   );
                 })}
-              </ul>
-            </aside>
+              </SelectInput>
+              <Button
+                variant="secondary"
+                size="sm"
+                inlineReason={false}
+                disabled={selectedIndex < 0 || selectedIndex >= queue.length - 1}
+                onClick={() => {
+                  if (
+                    selectedIndex >= 0 &&
+                    selectedIndex < queue.length - 1
+                  ) {
+                    selectPaper(queue[selectedIndex + 1], "next");
+                  }
+                }}
+                aria-label="Next paper"
+              >
+                Next
+                <ChevronRightIcon />
+              </Button>
+            </div>
+          )}
 
-            {selectedScan && (
-              <Card padded={false} className="flex flex-col overflow-hidden">
+          {selectedPaper && (
+              <Card
+                key={selectedPaper.id}
+                padded={false}
+                className={`flex flex-col overflow-hidden ${
+                  slideDir === "next"
+                    ? "slide-next"
+                    : slideDir === "prev"
+                      ? "slide-prev"
+                      : ""
+                }`}
+              >
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-hairline)] px-6 py-4">
-                  <div className="flex items-center gap-3">
-                    <h2>Scan #{shortId(selectedScan.id)}</h2>
-                    <span className="text-[12px] text-[var(--text-muted)] tabular-nums">
-                      {selectedIndex + 1} of {queue.length}
+                  <h2>{selectedPaper.nameText || "Unnamed paper"}</h2>
+                  <span className="text-sm tabular-nums">
+                    <span className="font-bold text-[var(--text-primary)]">
+                      {formatPointsValue(displayedEarnedPoints)} /{" "}
+                      {formatPointsValue(displayedTotalPoints)} pts
+                    </span>{" "}
+                    <span className="text-[var(--text-secondary)]">
+                      ({displayedScorePct.toFixed(1)}%)
                     </span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-[14px] font-medium text-[var(--text-primary)] tabular-nums">
-                      {formatPointsValue(selectedScan.earnedPoints)} /{" "}
-                      {formatPointsValue(selectedScan.totalPoints)} pts (
-                      {selectedScan.score.toFixed(1)}%)
-                    </span>
-                    {selectedScan.needsReview && (
-                      <Badge variant="warning">Provisional</Badge>
-                    )}
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      aria-label="Previous scan"
-                      disabled={!prevScan}
-                      disabledReason={
-                        !prevScan ? "First paper in queue" : undefined
-                      }
-                      onClick={() => prevScan && selectScan(prevScan)}
-                    >
-                      <ChevronLeftIcon />
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      aria-label="Next scan"
-                      disabled={!nextScan}
-                      disabledReason={
-                        !nextScan ? "Last paper in queue" : undefined
-                      }
-                      onClick={() => nextScan && selectScan(nextScan)}
-                    >
-                      <ChevronRightIcon />
-                    </Button>
-                  </div>
+                  </span>
                 </div>
 
                 <ReviewIdentityBar
-                  key={`${selectedScan.id}:${selectedScan.studentId ?? ""}:${selectedScan.studentIdText ?? ""}:${selectedScan.nameText}:${selectedScan.sectionText}:${selectedScan.dateText}:${selectedScan.keyVersion ?? "A"}:${selectedScan.keyVersionFlagged ? "kvflag" : "ok"}`}
-                  scan={selectedScan}
+                  key={selectedPaper.id}
+                  paper={selectedPaper}
                   students={students}
                   onUpdated={(updated) => {
                     if (
                       !updated.needsReview ||
                       (updated.keyVersion ?? "A") !==
-                        (selectedScan.keyVersion ?? "A") ||
+                        (selectedPaper.keyVersion ?? "A") ||
                       Boolean(updated.keyVersionFlagged) !==
-                        Boolean(selectedScan.keyVersionFlagged)
+                        Boolean(selectedPaper.keyVersionFlagged)
                     ) {
-                      void refreshQueue(updated.needsReview ? updated.id : null);
+                      if (!updated.needsReview) {
+                        clearPaperDraft(updated.id);
+                      }
+                      void loadReviewQueue(
+                        updated.needsReview ? updated.id : null,
+                        scopeQuizId,
+                        updated.needsReview,
+                      );
                       return;
                     }
                     setQueue((prev) =>
@@ -727,43 +795,48 @@ export default function ReviewPage() {
 
                 <div className="grid gap-6 p-6 md:grid-cols-2">
                   <ScanPreviewPane
-                    scanId={selectedScan.id}
+                    scanId={selectedPaper.id}
                     imageUrl={imageUrl}
-                    imageLoading={imageLoading}
+                    imageLoading={false}
                     highlightBox={highlightBox}
                     onRetryImage={() => setImageRetryCount((c) => c + 1)}
-                    answerKey={selectedScan.answerKey}
-                    questionRules={selectedScan.questionRules}
-                    keyVersion={selectedScan.keyVersion}
-                    answers={selectedScan.answers}
-                    flags={selectedScan.flags}
+                    answerKey={selectedPaper.answerKey}
+                    points={selectedPaper.points}
+                    questionRules={selectedPaper.questionRules}
+                    keyVersion={selectedPaper.keyVersion}
+                    showKeyVersion={
+                      (selectedPaper.availableKeyVersions?.length ?? 1) > 1 ||
+                      Boolean(selectedPaper.keyVersionFlagged)
+                    }
+                    answers={selectedPaper.answers}
+                    flags={selectedPaper.flags}
                     corrections={{
-                      ...selectedScan.corrections,
+                      ...selectedPaper.corrections,
                       ...draftCorrections,
                     }}
                   />
 
                   <div className="space-y-3">
-                    {selectedScan.keyVersionFlagged && (
-                      <div className="space-y-2 rounded-[8px] border border-amber-300 bg-[var(--warning-bg)] p-3.5">
+                    {selectedPaper.keyVersionFlagged && (
+                      <div className="space-y-2 rounded-lg border border-amber-300 bg-[var(--warning-bg)] p-3.5">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="text-[13px] font-semibold text-[var(--warning-text)]">
-                            Confirm Key Version
+                          <span className="text-[0.8125rem] font-semibold text-[var(--warning-text)]">
+                            Confirm Key version
                           </span>
                           <Badge variant="warning">Key strip flagged</Badge>
                         </div>
-                        <p className="text-[12px] text-[var(--warning-text)]">
-                          {selectedScan.detectedKeyVersion
-                            ? `Detected bubble "${selectedScan.detectedKeyVersion}", which is not configured on this quiz.`
-                            : "The printed Key Version strip (A–D) had an unclear or multiple mark."}
+                        <p className="text-xs text-[var(--warning-text)]">
+                          {selectedPaper.detectedKeyVersion
+                            ? `Detected bubble "${selectedPaper.detectedKeyVersion}", which is not configured on this quiz.`
+                            : "The printed Key strip (A to D) had an unclear or multiple mark."}
                         </p>
                         <div className="flex flex-wrap gap-2 pt-1">
-                          {(selectedScan.availableKeyVersions ?? ["A"]).map(
+                          {(selectedPaper.availableKeyVersions ?? ["A"]).map(
                             (ver) => (
                               <Button
                                 key={ver}
                                 variant={
-                                  ver === (selectedScan.keyVersion ?? "A")
+                                  ver === (selectedPaper.keyVersion ?? "A")
                                     ? "primary"
                                     : "secondary"
                                 }
@@ -779,27 +852,27 @@ export default function ReviewPage() {
                       </div>
                     )}
 
-                    <h3 className="text-[14px] font-medium text-[var(--text-primary)]">
+                    <h3 className="text-sm font-semibold text-[var(--text-primary)]">
                       Flagged questions ({flaggedQuestions.length})
                     </h3>
 
                     {!hasGradedAnswers ? (
-                      <p className="rounded-[8px] bg-[var(--warning-bg)] px-3.5 py-2.5 text-[14px] text-[var(--warning-text)]">
+                      <p className="rounded-lg bg-[var(--warning-bg)] px-3.5 py-2.5 text-sm text-[var(--warning-text)]">
                         This scan has no graded answers.
                       </p>
                     ) : flaggedQuestions.length === 0 ? (
-                      selectedScan.keyVersionFlagged ? (
-                        <p className="text-[14px] text-[var(--text-secondary)]">
-                          No answer bubbles are flagged. Choose a Key Version
-                          above to complete review.
+                      selectedPaper.keyVersionFlagged ? (
+                        <p className="text-sm text-[var(--text-secondary)]">
+                          No answer bubbles are flagged. Select a Key version
+                          above to finish review.
                         </p>
                       ) : (
-                        <div className="space-y-3 rounded-[8px] border border-amber-300 bg-[var(--warning-bg)] p-4">
+                        <div className="space-y-3 rounded-lg border border-amber-300 bg-[var(--warning-bg)] p-4">
                           <div>
-                            <p className="text-[14px] font-medium text-[var(--warning-text)]">
+                            <p className="text-sm font-semibold text-[var(--warning-text)]">
                               Blank answer sheet
                             </p>
-                            <p className="mt-1 text-[13px] text-[var(--warning-text)]">
+                            <p className="mt-1 text-[0.8125rem] text-[var(--warning-text)]">
                               Every bubble on this scan appears unmarked. Confirm
                               to score it as 0 points, or delete the paper from
                               the quiz Papers tab.
@@ -812,7 +885,7 @@ export default function ReviewPage() {
                             onClick={() => void handleConfirmBlankSheet()}
                           >
                             {savingCorrections
-                              ? "Saving…"
+                              ? "Saving..."
                               : "Confirm blank sheet (0 pts)"}
                           </Button>
                         </div>
@@ -822,44 +895,48 @@ export default function ReviewPage() {
                         {flaggedQuestions.map((q) => {
                           const chosen = draftCorrections[q.number];
                           const isFocused = focusedQuestion === q.number;
-                          const isCorrected =
-                            selectedScan.corrections[q.number] !== undefined;
                           const rowCrop = questionRegionPercent(
                             q.number,
-                            selectedScan.answers.length || 20,
+                            selectedPaper.answers.length || 20,
                           );
                           const cropAspect = rowCropAspect(rowCrop);
+                          const hint = q.reason.startsWith("Two marks")
+                            ? `Two marks (${q.readValue}). Select the intended answer.`
+                            : `Scanner read ${q.readValue}. Select the intended answer.`;
                           return (
                             <li
                               key={q.number}
                               onClick={() => setFocusedQuestion(q.number)}
-                              className={`cursor-pointer rounded-[8px] border p-3.5 transition-colors ${
+                              className={`cursor-pointer rounded-xl border p-3.5 transition-colors ${
                                 isFocused
-                                  ? "border-[var(--brand)] bg-[var(--bg-subtle)]/40"
+                                  ? "border-[var(--brand)] bg-[var(--brand)]/[0.025] ring-1 ring-[var(--brand)]"
                                   : "border-[var(--border-hairline)] bg-[var(--bg-surface)]"
                               }`}
                             >
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-[14px] font-medium text-[var(--text-primary)]">
+                                  <span className="text-sm font-bold text-[var(--text-primary)]">
                                     Q{q.number}
                                   </span>
-                                  {isCorrected && (
-                                    <Badge variant="success">Corrected</Badge>
+                                  {chosen !== undefined && (
+                                    <Badge variant="success">
+                                      Confirmed:{" "}
+                                      {chosen === "" ? "Blank" : chosen}
+                                    </Badge>
                                   )}
                                 </div>
-                                <span className="text-[12px] font-medium text-[var(--warning)]">
+                                <span className="text-xs font-medium text-[var(--warning-text)]">
                                   {q.reason}
                                 </span>
                               </div>
-                              <p className="mt-0.5 text-[12px] text-[var(--text-muted)]">
-                                Read: {q.readValue}
+                              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                                {hint}
                               </p>
 
                               {imageUrl && (
                                 <div
                                   aria-hidden="true"
-                                  className="mt-2 w-full max-w-[260px] overflow-hidden rounded-[6px] border border-[var(--border-hairline)] bg-white"
+                                  className="mt-2 w-full max-w-[260px] overflow-hidden rounded-lg border border-[var(--border-hairline)] bg-white p-1"
                                   style={{ aspectRatio: `${cropAspect}` }}
                                 >
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -876,7 +953,7 @@ export default function ReviewPage() {
                                 </div>
                               )}
 
-                              <div className="mt-2.5 flex flex-wrap gap-2">
+                              <div className="mt-2.5 flex flex-wrap gap-1.5">
                                 {ANSWER_CHOICES.map((choice) => {
                                   const active = chosen === choice;
                                   return (
@@ -888,12 +965,12 @@ export default function ReviewPage() {
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         setFocusedQuestion(q.number);
-                                        setDraftCorrections((prev) => ({
+                                        updateSelectedDrafts((prev) => ({
                                           ...prev,
                                           [q.number]: choice,
                                         }));
                                       }}
-                                      className={`min-h-[36px] min-w-[36px] rounded-[8px] border px-3.5 py-1.5 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] ${
+                                      className={`min-h-9 min-w-9 rounded-lg border px-3 py-1.5 text-[0.8125rem] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] ${
                                         active
                                           ? "border-[var(--brand)] bg-[var(--brand)] text-white"
                                           : "border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:bg-[var(--bg-subtle)]"
@@ -910,12 +987,12 @@ export default function ReviewPage() {
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setFocusedQuestion(q.number);
-                                    setDraftCorrections((prev) => ({
+                                    updateSelectedDrafts((prev) => ({
                                       ...prev,
                                       [q.number]: "",
                                     }));
                                   }}
-                                  className={`min-h-[36px] rounded-[8px] border px-3.5 py-1.5 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] ${
+                                  className={`ml-1 min-h-9 rounded-lg border px-3.5 py-1.5 text-[0.8125rem] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] ${
                                     chosen === ""
                                       ? "border-[var(--brand)] bg-[var(--brand)] text-white"
                                       : "border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:bg-[var(--bg-subtle)]"
@@ -932,30 +1009,26 @@ export default function ReviewPage() {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border-hairline)] bg-[var(--bg-subtle)]/50 px-6 py-3.5">
-                  <p className="text-[12px] text-[var(--text-muted)]">
-                    {answeredCount} of {flaggedQuestions.length} answered
-                    {remainingCount > 0 ? ` (${remainingCount} left)` : ""} ·
-                    A–E to answer, Enter to save
-                  </p>
+                <div className="flex items-center justify-end border-t border-[var(--border-hairline)] bg-[var(--bg-subtle)]/40 px-6 py-3.5">
                   <Button
                     variant="primary"
+                    inlineReason={false}
                     disabled={!allFlaggedChosen || savingCorrections}
-                    disabledReason={
-                      !hasGradedAnswers
-                        ? "Scan has no graded answers"
-                        : remainingCount > 0
-                          ? `Answer ${remainingCount} remaining question${remainingCount === 1 ? "" : "s"} first`
-                          : undefined
-                    }
                     onClick={() => void handleSaveAndNext()}
                   >
-                    {savingCorrections ? "Saving…" : "Save and next"}
+                    {savingCorrections
+                      ? "Saving..."
+                      : !hasGradedAnswers
+                        ? "No graded answers"
+                        : remainingCount > 0
+                          ? `Confirm ${remainingCount} more to save`
+                          : nextPaper
+                            ? "Save and next"
+                            : "Save"}
                   </Button>
                 </div>
               </Card>
             )}
-          </div>
         </div>
       )}
 

@@ -4,19 +4,23 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { StudentFormDrawer } from "@/components/roster/StudentFormDrawer";
-import { Badge } from "@/components/ui/Badge";
+import { ActionMenu } from "@/components/ui/ActionMenu";
+import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
+import { Dialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { DocumentIcon, UsersIcon } from "@/components/ui/Icons";
+import { DocumentIcon, UsersIcon, WarningIcon } from "@/components/ui/Icons";
 import { SkeletonRows } from "@/components/ui/Skeleton";
-import { formatDate } from "@/lib/format";
+import { useToast } from "@/components/ui/Toast";
+import { getErrorMessage } from "@/lib/api";
+import { formatHumanDate } from "@/lib/format";
 import { formatPointsValue } from "@/lib/scoring";
 import {
+  deleteStudent,
   getRoster,
   getStudentDetail,
-  type SectionWithCount,
+  type ClassWithCount,
   type StudentDetail,
   type StudentGradedPaperItem,
 } from "@/lib/workspace";
@@ -24,16 +28,21 @@ import {
 export default function StudentDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const { push: pushToast } = useToast();
   const studentId = params.id;
 
   const [detail, setDetail] = useState<StudentDetail | null>(null);
-  const [allClasses, setAllClasses] = useState<SectionWithCount[]>([]);
+  const [allClasses, setAllClasses] = useState<ClassWithCount[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  const loadData = useCallback(async () => {
+  const loadStudentDetail = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [studentDetail, roster] = await Promise.all([
         getStudentDetail(studentId),
@@ -45,8 +54,10 @@ export default function StudentDetailPage() {
         return;
       }
       setDetail(studentDetail);
-      setAllClasses(roster.sections);
+      setAllClasses(roster.classes);
       setNotFound(false);
+    } catch (err) {
+      setLoadError(getErrorMessage(err, "Could not load student."));
     } finally {
       setLoading(false);
     }
@@ -55,12 +66,27 @@ export default function StudentDetailPage() {
   useEffect(() => {
     let active = true;
     queueMicrotask(() => {
-      if (active) void loadData();
+      if (active) void loadStudentDetail();
     });
     return () => {
       active = false;
     };
-  }, [loadData]);
+  }, [loadStudentDetail]);
+
+  async function handleConfirmDelete() {
+    if (!detail || deleting) return;
+    setDeleting(true);
+    try {
+      const fullName = `${detail.student.lastName}, ${detail.student.firstName}`;
+      await deleteStudent(detail.student.id);
+      setDeleteOpen(false);
+      pushToast(`Deleted "${fullName}".`, "success");
+      router.push("/students");
+    } catch (err) {
+      pushToast(getErrorMessage(err, "Could not delete student."), "error");
+      setDeleting(false);
+    }
+  }
 
   if (loading && !detail) {
     return (
@@ -70,25 +96,47 @@ export default function StudentDetailPage() {
     );
   }
 
+  if (loadError && !detail) {
+    return (
+      <div className="space-y-4">
+        <Breadcrumb
+          items={[
+            { label: "Students", href: "/students" },
+            { label: "Error" },
+          ]}
+        />
+        <EmptyState
+          icon={<WarningIcon />}
+          title="Could not load student"
+          description={loadError}
+          nextStep="Confirm the backend server is running and try again."
+          action={
+            <Button variant="primary" onClick={() => void loadStudentDetail()}>
+              Try again
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
   if (notFound || !detail) {
     return (
       <div className="space-y-4">
-        <Link
-          href="/students"
-          className="text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-        >
-          ← Back to students
-        </Link>
+        <Breadcrumb
+          items={[
+            { label: "Students", href: "/students" },
+            { label: "Not found" },
+          ]}
+        />
         <EmptyState
           icon={<UsersIcon />}
           title="Student not found"
-          description="This student does not exist in the local workspace."
+          description="This student does not exist in this folder."
+          nextStep="Return to Students to open or create a student."
           action={
-            <Link
-              href="/students"
-              className="inline-flex rounded-[8px] bg-[var(--brand)] px-3.5 py-2 text-[14px] font-medium text-white hover:bg-[var(--brand-hover)]"
-            >
-              View all students
+            <Link href="/students">
+              <Button variant="primary">All students</Button>
             </Link>
           }
         />
@@ -96,7 +144,7 @@ export default function StudentDetailPage() {
     );
   }
 
-  const { student, sections, gradedPapers } = detail;
+  const { student, classes, gradedPapers } = detail;
 
   const paperColumns: DataTableColumn<StudentGradedPaperItem>[] = [
     {
@@ -105,7 +153,7 @@ export default function StudentDetailPage() {
       render: (item) => (
         <Link
           href={`/quizzes/${item.quiz.id}`}
-          className="font-medium text-[var(--text-primary)] hover:text-[var(--brand-text)] hover:underline"
+          className="font-semibold text-[var(--text-primary)] hover:text-[var(--brand-text)] hover:underline"
         >
           {item.quiz.name}
         </Link>
@@ -116,9 +164,9 @@ export default function StudentDetailPage() {
       header: "Date",
       render: (item) => (
         <span className="text-[var(--text-secondary)] tabular-nums">
-          {item.paper.dateText ||
-            item.quiz.date ||
-            formatDate(item.paper.createdAt)}
+          {formatHumanDate(
+            item.paper.dateText || item.quiz.date || item.paper.createdAt,
+          )}
         </span>
       ),
     },
@@ -126,7 +174,7 @@ export default function StudentDetailPage() {
       key: "keyVersion",
       header: "Key",
       render: (item) => (
-        <span className="font-mono text-[13px]">
+        <span className="font-medium tabular-nums">
           {item.paper.keyVersion ?? "A"}
         </span>
       ),
@@ -138,12 +186,17 @@ export default function StudentDetailPage() {
       render: (item) => {
         const pct =
           item.totalPoints > 0
-            ? Math.round((item.earnedPoints / item.totalPoints) * 100)
+            ? (item.earnedPoints / item.totalPoints) * 100
             : 0;
         return (
-          <span className="font-mono tabular-nums">
-            {formatPointsValue(item.earnedPoints)} /{" "}
-            {formatPointsValue(item.totalPoints)} pts ({pct}%)
+          <span className="tabular-nums">
+            <span className="font-bold text-[var(--text-primary)]">
+              {formatPointsValue(item.earnedPoints)} /{" "}
+              {formatPointsValue(item.totalPoints)} pts
+            </span>{" "}
+            <span className="text-[0.8125rem] text-[var(--text-secondary)]">
+              ({pct.toFixed(1)}%)
+            </span>
           </span>
         );
       },
@@ -153,135 +206,121 @@ export default function StudentDetailPage() {
       header: "Status",
       render: (item) =>
         item.paper.needsReview ? (
-          <Badge variant="warning">Needs review</Badge>
+          <span className="text-[0.8125rem] font-medium text-[var(--warning-text)]">
+            Needs review
+          </span>
         ) : (
-          <Badge variant="success">Graded</Badge>
+          <span className="text-[0.8125rem] font-medium text-[var(--success-text)]">
+            Confirmed
+          </span>
         ),
     },
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <nav
-          aria-label="Breadcrumb"
-          className="text-[13px] text-[var(--text-secondary)]"
-        >
-          <Link href="/students" className="hover:text-[var(--text-primary)]">
-            ← Students
-          </Link>{" "}
-          <span className="text-[var(--text-muted)]">/</span>{" "}
-          <span className="text-[var(--text-primary)]">
-            {student.lastName}, {student.firstName}
-          </span>
-        </nav>
+    <div className="space-y-5">
+      <div>
+        <Breadcrumb
+          items={[
+            { label: "Students", href: "/students" },
+            { label: `${student.lastName}, ${student.firstName}` },
+          ]}
+        />
 
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1>
               {student.firstName} {student.lastName}
             </h1>
-            <p className="mt-0.5 text-[13px] text-[var(--text-secondary)]">
-              Student ID:{" "}
-              <span className="font-mono text-[var(--text-primary)]">
-                {student.studentCode}
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-[var(--text-secondary)]">
+              <span className="tabular-nums">
+                Student ID {student.studentCode}
               </span>
-            </p>
+              {student.externalRef && (
+                <span className="tabular-nums">LRN {student.externalRef}</span>
+              )}
+              {classes.length === 0 ? (
+                <span className="text-[var(--text-muted)]">Unassigned</span>
+              ) : (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {classes.map((cls) => (
+                    <Link
+                      key={cls.id}
+                      href={`/classes/${cls.id}`}
+                      className="rounded-md bg-[var(--bg-subtle)] px-2 py-0.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--brand-subtle)] hover:text-[var(--brand-text)]"
+                    >
+                      {cls.name}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-          <Button variant="secondary" onClick={() => setDrawerOpen(true)}>
-            Edit student
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="primary" onClick={() => setDrawerOpen(true)}>
+              Edit student
+            </Button>
+            <ActionMenu
+              label="More student actions"
+              items={[
+                {
+                  id: "delete",
+                  label: "Delete student",
+                  variant: "danger",
+                  onClick: () => setDeleteOpen(true),
+                },
+              ]}
+            />
+          </div>
         </div>
       </div>
 
-      <Card>
-        <div className="grid grid-cols-1 gap-4 text-[14px] sm:grid-cols-2 lg:grid-cols-5">
-          <div>
-            <p className="text-[12px] font-medium text-[var(--text-muted)]">
-              First Name
-            </p>
-            <p className="mt-1 font-medium text-[var(--text-primary)]">
-              {student.firstName}
-            </p>
-          </div>
-          <div>
-            <p className="text-[12px] font-medium text-[var(--text-muted)]">
-              Last Name
-            </p>
-            <p className="mt-1 font-medium text-[var(--text-primary)]">
-              {student.lastName}
-            </p>
-          </div>
-          <div>
-            <p className="text-[12px] font-medium text-[var(--text-muted)]">
-              Student ID
-            </p>
-            <p className="mt-1 font-mono font-medium text-[var(--text-primary)] tabular-nums">
-              {student.studentCode}
-            </p>
-          </div>
-          <div>
-            <p className="text-[12px] font-medium text-[var(--text-muted)]">
-              External Reference
-            </p>
-            <p className="mt-1 text-[var(--text-primary)]">
-              {student.externalRef || "—"}
-            </p>
-          </div>
-          <div>
-            <p className="text-[12px] font-medium text-[var(--text-muted)]">
-              Classes
-            </p>
-            {sections.length === 0 ? (
-              <p className="mt-1 text-[var(--text-muted)]">None</p>
-            ) : (
-              <div className="mt-1 flex flex-wrap gap-1.5">
-                {sections.map((sec) => (
-                  <Link
-                    key={sec.id}
-                    href={`/classes/${sec.id}`}
-                    className="rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--brand-text)]"
-                  >
-                    {sec.name}
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </Card>
-
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2>Graded Quizzes ({gradedPapers.length})</h2>
-        </div>
+        <h2>Graded quizzes ({gradedPapers.length})</h2>
 
         {gradedPapers.length === 0 ? (
           <EmptyState
             icon={<DocumentIcon />}
-            title="No graded quizzes yet"
-            description="Graded answer sheets linked to this student or matched by Student ID appear here."
+            title="No graded papers yet"
+            description={`Papers matching Student ID ${student.studentCode} appear here automatically.`}
+            nextStep="Open a quiz and upload scanned sheets to grade this student."
           />
         ) : (
           <DataTable
             rows={gradedPapers}
             columns={paperColumns}
             rowKey={(item) => item.paper.id}
+            actionsHeaderSrOnly
+            onRowClick={(item) => {
+              if (item.paper.needsReview) {
+                router.push(
+                  `/review?quiz_id=${item.quiz.id}&paper_id=${item.paper.id}`,
+                );
+              } else {
+                router.push(
+                  `/quizzes/${item.quiz.id}?paper_id=${encodeURIComponent(item.paper.id)}`,
+                );
+              }
+            }}
             renderActions={(item) =>
               item.paper.needsReview ? (
                 <Link
                   href={`/review?quiz_id=${item.quiz.id}&paper_id=${item.paper.id}`}
-                  className="rounded-[8px] border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-subtle)]"
+                  className="inline-flex min-h-9 items-center justify-center rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-3.5 py-2 text-[0.8125rem] font-medium text-[var(--text-primary)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)] [@media(pointer:coarse)]:min-h-12"
                 >
                   Review
                 </Link>
               ) : (
-                <Link
-                  href={`/quizzes/${item.quiz.id}`}
-                  className="rounded-[8px] border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-subtle)]"
-                >
-                  Open quiz
-                </Link>
+                <ActionMenu
+                  label={`Actions for ${item.quiz.name}`}
+                  items={[
+                    {
+                      id: "open-quiz",
+                      label: "Inspect paper",
+                      href: `/quizzes/${item.quiz.id}?paper_id=${encodeURIComponent(item.paper.id)}`,
+                    },
+                  ]}
+                />
               )
             }
           />
@@ -289,20 +328,27 @@ export default function StudentDetailPage() {
       </div>
 
       <StudentFormDrawer
-        key={`profile-${student.id}-${student.sectionIds.join(",")}-${student.firstName}-${student.lastName}`}
+        key={drawerOpen ? `profile-${student.id}` : "profile-closed"}
         open={drawerOpen}
         student={student}
-        sections={allClasses}
-        defaultSectionId=""
+        classes={allClasses}
+        defaultClassId=""
         onSaved={async () => {
           setDrawerOpen(false);
-          await loadData();
-        }}
-        onDeleted={() => {
-          setDrawerOpen(false);
-          router.push("/students");
+          await loadStudentDetail();
         }}
         onClose={() => setDrawerOpen(false)}
+      />
+
+      <Dialog
+        open={deleteOpen}
+        title={`Delete student "${student.lastName}, ${student.firstName}"?`}
+        description="Removes this student from the directory and unlinks their graded papers."
+        confirmLabel="Delete student"
+        confirmVariant="danger"
+        busy={deleting}
+        onConfirm={() => void handleConfirmDelete()}
+        onClose={() => setDeleteOpen(false)}
       />
     </div>
   );
