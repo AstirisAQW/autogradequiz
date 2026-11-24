@@ -31,7 +31,6 @@ def column_to_dict(column: AnswerColumn) -> dict:
 
 
 def template_to_json_dict(template: Template) -> dict:
-    """Return the template.json-shaped dict for one built Template."""
     corners = [
         point_to_dict(marker_id, point) for marker_id, point in template.corner_fiducials.items()
     ]

@@ -16,7 +16,6 @@ def default_workspace_dir() -> str:
 
 
 class Settings(BaseSettings):
-    """Runtime configuration for the stateless grading backend."""
 
     autograde_data_dir: str = Field(default_factory=default_data_dir)
     autograde_workspace_dir: str = Field(default_factory=default_workspace_dir)

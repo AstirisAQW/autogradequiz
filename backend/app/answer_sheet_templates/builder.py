@@ -1,5 +1,3 @@
-"""Converts a millimeter-based TemplateSpec into a fraction-of-page Template."""
-
 from app.answer_sheet_templates.geometry import (
     ANSWER_CHOICES,
     FIDUCIAL_SIZE_MM,
@@ -18,14 +16,15 @@ from app.answer_sheet_templates.geometry import (
 )
 from app.answer_sheet_templates.layout_spec import ColumnSpecMm, TemplateSpec, TextFieldSpecMm
 
-PAGE = PageSize(width_mm=210.0, height_mm=297.0, dpi=300)
+A4_PAGE = PageSize(width_mm=210.0, height_mm=297.0, dpi=300)
+PAGE = A4_PAGE
 
 FIDUCIAL_MARGIN_MM = 6.0
 
 DEFAULT_TEXT_FIELDS: tuple[TextFieldSpecMm, ...] = (
     TextFieldSpecMm(id="name", label="Name", x_mm=20, y_mm=18, width_mm=90, height_mm=10),
     TextFieldSpecMm(id="date", label="Date", x_mm=130, y_mm=18, width_mm=55, height_mm=10),
-    TextFieldSpecMm(id="section", label="Section", x_mm=20, y_mm=32, width_mm=60, height_mm=10),
+    TextFieldSpecMm(id="class", label="Class", x_mm=20, y_mm=32, width_mm=60, height_mm=10),
     TextFieldSpecMm(
         id="student_id", label="Student ID", x_mm=100, y_mm=32, width_mm=85, height_mm=10
     ),

@@ -1,5 +1,3 @@
-"""Scoring classified bubble answers against an answer key."""
-
 from __future__ import annotations
 
 from collections import Counter
@@ -10,7 +8,6 @@ from app.bubble_grading.classifier import BubbleResult, QuestionFill
 
 
 class QuestionOutcome(Enum):
-    """A graded answer compared against the answer key."""
 
     CORRECT = "correct"
     PARTIAL = "partial"
@@ -22,7 +19,6 @@ class QuestionOutcome(Enum):
 
 @dataclass(frozen=True)
 class QuestionRule:
-    """Optional partial-credit alternate answers and attempted-incorrect score."""
 
     alternate_answers: tuple[tuple[str, float], ...] = ()
     incorrect_points: float = 0.0
@@ -61,13 +57,31 @@ def _alt_choice_map(rule: QuestionRule) -> dict[str, float]:
     return mapping
 
 
+def score_single_answer(
+    choice: str,
+    accepted_expr: str,
+    weight: float,
+    rule: QuestionRule | None = None,
+) -> tuple[QuestionOutcome, float, float]:
+    active_rule = rule or QuestionRule()
+    alt_map = _alt_choice_map(active_rule)
+    max_pts = max([weight, *alt_map.values(), 0.0])
+    if choice == "":
+        return QuestionOutcome.BLANK, 0.0, max_pts
+    accepted = [c for c in accepted_expr.split("+") if c]
+    if choice in accepted:
+        return QuestionOutcome.CORRECT, weight, max_pts
+    if choice in alt_map:
+        return QuestionOutcome.PARTIAL, alt_map[choice], max_pts
+    return QuestionOutcome.WRONG, active_rule.incorrect_points, max_pts
+
+
 def score_sheet(
     question_fills: dict[int, QuestionFill],
     answer_key: list[str],
     points: list[float] | None = None,
     question_rules: list[QuestionRule] | None = None,
 ) -> ScoreSummary:
-    """Grade classified answers against an answer key and optional partial/attempt rules."""
     outcomes: dict[int, QuestionOutcome] = {}
     earned_points = 0.0
     total_points = 0.0
@@ -90,17 +104,11 @@ def score_sheet(
         elif fill.result == BubbleResult.AMBIGUOUS:
             outcomes[question_number] = QuestionOutcome.AMBIGUOUS
         else:
-            accepted_choices = answer_key[question_number - 1].split("+")
-            marked_choice = fill.marked_choices[0]
-            if marked_choice in accepted_choices:
-                outcomes[question_number] = QuestionOutcome.CORRECT
-                earned_points += weight
-            elif marked_choice in alt_map:
-                outcomes[question_number] = QuestionOutcome.PARTIAL
-                earned_points += alt_map[marked_choice]
-            else:
-                outcomes[question_number] = QuestionOutcome.WRONG
-                earned_points += rule.incorrect_points
+            outcome, earned, _ = score_single_answer(
+                fill.marked_choices[0], answer_key[question_number - 1], weight, rule
+            )
+            outcomes[question_number] = outcome
+            earned_points += earned
 
     counts = Counter(outcomes.values())
     return ScoreSummary(

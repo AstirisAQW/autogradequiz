@@ -1,25 +1,8 @@
-"""Row-relative normalized-ink bubble classification.
-
-Each aligned sheet is calibrated once from its own paper and fiducial levels:
-- ``white``: median intensity of blank paper regions away from bubbles, text, and markers.
-- ``black``: median intensity of the four corner fiducial squares.
-Pixels are converted to a normalized ink fraction ``clip((white - px) / (white - black), 0, 1)``.
-
-Each bubble is measured strictly on its inner disc (``radius - outline_thickness - 1``) so
-the printed circle outline never contributes ink. From that inner disc we compute mean ink,
-90th-percentile peak ink, and the largest connected dark blob area as a fraction of the disc.
-
-Decisions are made per question row across choices A-E rather than per bubble in isolation:
-- BLANK if the strongest bubble's peak ink is below ``blank_peak_floor``.
-- MULTIPLE if at least two bubbles exceed ``multiple_peak_floor`` and their ink gap is small.
-- FILLED if the top candidate's mean ink and blob coverage clear the solid-mark cutoffs.
-- AMBIGUOUS otherwise, keeping the top candidate in ``marked_choices`` for teacher review.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from functools import lru_cache
 
 import cv2
 import numpy as np
@@ -41,7 +24,6 @@ from app.answer_sheet_templates.layout_spec import TemplateSpec
 
 
 class BubbleResult(Enum):
-    """The four classes a graded answer can fall into."""
 
     FILLED = "filled"
     BLANK = "blank"
@@ -51,7 +33,6 @@ class BubbleResult(Enum):
 
 @dataclass(frozen=True)
 class ClassifierThresholds:
-    """Cutoffs for normalized-ink measurement and row-relative classification."""
 
     blank_peak_floor: float = 0.08
     blank_soft_peak_floor: float = 0.22
@@ -72,21 +53,15 @@ DEFAULT_THRESHOLDS = ClassifierThresholds()
 
 @dataclass(frozen=True)
 class BubbleFill:
-    """Normalized-ink measurements for a single bubble's inner disc.
 
-    fill_ratio stores mean ink; trace_ratio stores 90th-percentile peak ink;
-    blob_ratio stores the largest connected dark component as a fraction of the disc.
-    """
-
-    fill_ratio: float
+    mean_ink: float
     result: BubbleResult
-    trace_ratio: float = 0.0
+    peak_ink: float = 0.0
     blob_ratio: float = 0.0
 
 
 @dataclass(frozen=True)
 class QuestionFill:
-    """The aggregated row-relative result for one question (choices A-E)."""
 
     result: BubbleResult
     marked_choices: tuple[str, ...]
@@ -101,7 +76,6 @@ def to_grayscale(image: np.ndarray) -> np.ndarray:
 
 
 def circular_mask(shape: tuple[int, int], center_px: tuple[int, int], radius_px: int) -> np.ndarray:
-    """Boolean mask, True for points inside the circle of radius_px centered at center_px."""
     height, width = shape
     y_indices, x_indices = np.ogrid[:height, :width]
     center_x, center_y = center_px
@@ -109,17 +83,21 @@ def circular_mask(shape: tuple[int, int], center_px: tuple[int, int], radius_px:
     return distance_sq <= radius_px**2
 
 
+@lru_cache(maxsize=16)
+def _canonical_disc_mask(inner_radius: int) -> tuple[np.ndarray, int]:
+    diameter = 2 * inner_radius + 1
+    mask = circular_mask((diameter, diameter), (inner_radius, inner_radius), inner_radius)
+    return mask, int(np.count_nonzero(mask))
+
+
 def calibrate_sheet_ink(gray_image: np.ndarray, page: PageSize = PAGE) -> np.ndarray:
-    """Calibrate per-sheet white/black levels and return float32 ink in [0, 1]."""
     height, width = gray_image.shape[:2]
 
-    # Bottom band (y in 81%..93%, x in 12%..88%) is plain paper across all templates.
     y0, y1 = int(round(height * 0.81)), int(round(height * 0.93))
     x0, x1 = int(round(width * 0.12)), int(round(width * 0.88))
     paper_patch = gray_image[y0:y1, x0:x1]
     white = float(np.median(paper_patch)) if paper_patch.size else 255.0
 
-    # Sample the inner 50% of each corner fiducial square to avoid border jitter.
     fid_px = mm_length_to_px(FIDUCIAL_SIZE_MM, page)
     pad = max(int(round(fid_px * 0.25)), 1)
     fid_samples: list[np.ndarray] = []
@@ -142,8 +120,15 @@ def calibrate_sheet_ink(gray_image: np.ndarray, page: PageSize = PAGE) -> np.nda
 
 
 def _largest_blob_fraction(dark_mask: np.ndarray, disc_pixel_count: int) -> float:
-    if disc_pixel_count == 0 or not np.any(dark_mask):
+    if disc_pixel_count == 0:
         return 0.0
+    dark_count = int(np.count_nonzero(dark_mask))
+    if dark_count == 0:
+        return 0.0
+    if dark_count == 1:
+        return 1.0 / disc_pixel_count
+    if dark_count == disc_pixel_count:
+        return 1.0
     num_labels, _, stats, _ = cv2.connectedComponentsWithStats(
         dark_mask.astype(np.uint8), connectivity=8
     )
@@ -159,7 +144,6 @@ def measure_bubble_ink(
     radius_px: int,
     thresholds: ClassifierThresholds = DEFAULT_THRESHOLDS,
 ) -> BubbleFill:
-    """Measure mean ink, 90th-percentile peak ink, and largest dark blob on the inner disc."""
     inner_radius = max(radius_px - BUBBLE_OUTLINE_THICKNESS_PX - 1, 1)
     height, width = ink_map.shape[:2]
     cx, cy = center_px
@@ -169,14 +153,18 @@ def measure_bubble_ink(
     patch = ink_map[y0:y1, x0:x1]
     if patch.size == 0:
         return BubbleFill(
-            fill_ratio=0.0, result=BubbleResult.BLANK, trace_ratio=0.0, blob_ratio=0.0
+            mean_ink=0.0, result=BubbleResult.BLANK, peak_ink=0.0, blob_ratio=0.0
         )
 
-    disc_mask = circular_mask(patch.shape, (cx - x0, cy - y0), inner_radius)
-    disc_count = int(disc_mask.sum())
+    diameter = 2 * inner_radius + 1
+    if patch.shape == (diameter, diameter):
+        disc_mask, disc_count = _canonical_disc_mask(inner_radius)
+    else:
+        disc_mask = circular_mask(patch.shape, (cx - x0, cy - y0), inner_radius)
+        disc_count = int(np.count_nonzero(disc_mask))
     if disc_count == 0:
         return BubbleFill(
-            fill_ratio=0.0, result=BubbleResult.BLANK, trace_ratio=0.0, blob_ratio=0.0
+            mean_ink=0.0, result=BubbleResult.BLANK, peak_ink=0.0, blob_ratio=0.0
         )
 
     vals = patch[disc_mask]
@@ -187,36 +175,10 @@ def measure_bubble_ink(
     )
 
     return BubbleFill(
-        fill_ratio=mean_ink,
+        mean_ink=mean_ink,
         result=BubbleResult.AMBIGUOUS,
-        trace_ratio=peak_ink,
+        peak_ink=peak_ink,
         blob_ratio=blob_ratio,
-    )
-
-
-def classify_bubble(
-    gray_image: np.ndarray,
-    center_px: tuple[int, int],
-    radius_px: int,
-    thresholds: ClassifierThresholds = DEFAULT_THRESHOLDS,
-) -> BubbleFill:
-    """Single-bubble helper that calibrates on the image and measures the inner disc."""
-    ink_map = calibrate_sheet_ink(to_grayscale(gray_image), PAGE)
-    fill = measure_bubble_ink(ink_map, center_px, radius_px, thresholds)
-    if fill.trace_ratio < thresholds.blank_peak_floor:
-        result = BubbleResult.BLANK
-    elif (
-        fill.fill_ratio >= thresholds.filled_min_mean_ink
-        and fill.blob_ratio >= thresholds.filled_min_blob_ratio
-    ):
-        result = BubbleResult.FILLED
-    else:
-        result = BubbleResult.AMBIGUOUS
-    return BubbleFill(
-        fill_ratio=fill.fill_ratio,
-        result=result,
-        trace_ratio=fill.trace_ratio,
-        blob_ratio=fill.blob_ratio,
     )
 
 
@@ -224,48 +186,47 @@ def aggregate_question_fill(
     bubble_fills: tuple[tuple[str, BubbleFill], ...],
     thresholds: ClassifierThresholds = DEFAULT_THRESHOLDS,
 ) -> QuestionFill:
-    """Decide one question's result across choices A-E from their normalized ink."""
     ranked = sorted(
         bubble_fills,
-        key=lambda item: (item[1].trace_ratio, item[1].fill_ratio),
+        key=lambda item: (item[1].peak_ink, item[1].mean_ink),
         reverse=True,
     )
     best_choice, best = ranked[0]
     second_choice, second = ranked[1]
 
-    mean_gap = best.fill_ratio - second.fill_ratio
+    mean_gap = best.mean_ink - second.mean_ink
     is_stray_speck = (
-        best.trace_ratio >= thresholds.blob_ink_threshold
-        and best.trace_ratio < thresholds.blank_stray_max_peak
-        and best.fill_ratio < thresholds.blank_stray_max_mean
+        best.peak_ink >= thresholds.blob_ink_threshold
+        and best.peak_ink < thresholds.blank_stray_max_peak
+        and best.mean_ink < thresholds.blank_stray_max_mean
         and best.blob_ratio < thresholds.blank_stray_max_blob
     )
     if (
-        best.trace_ratio < thresholds.blank_peak_floor
+        best.peak_ink < thresholds.blank_peak_floor
         or (
-            best.trace_ratio < thresholds.blank_soft_peak_floor
+            best.peak_ink < thresholds.blank_soft_peak_floor
             and mean_gap < thresholds.blank_min_mean_gap
         )
         or is_stray_speck
     ):
         updated = tuple(
-            (c, BubbleFill(bf.fill_ratio, BubbleResult.BLANK, bf.trace_ratio, bf.blob_ratio))
+            (c, BubbleFill(bf.mean_ink, BubbleResult.BLANK, bf.peak_ink, bf.blob_ratio))
             for c, bf in bubble_fills
         )
         return QuestionFill(
             result=BubbleResult.BLANK,
             marked_choices=(),
             bubble_fills=updated,
-            confidence=max(0.0, thresholds.blank_peak_floor - best.trace_ratio),
+            confidence=max(0.0, thresholds.blank_peak_floor - best.peak_ink),
         )
 
     above_multi = [
         (c, bf)
         for c, bf in ranked
-        if bf.trace_ratio >= thresholds.multiple_peak_floor
-        and bf.fill_ratio >= thresholds.multiple_min_second_mean
+        if bf.peak_ink >= thresholds.multiple_peak_floor
+        and bf.mean_ink >= thresholds.multiple_min_second_mean
     ]
-    gap = best.trace_ratio - second.trace_ratio
+    gap = best.peak_ink - second.peak_ink
     if len(above_multi) >= 2 and gap <= thresholds.multiple_max_gap:
         multi_set = {mc for mc, _ in above_multi}
         multi_choices = tuple(c for c, _ in bubble_fills if c in multi_set)
@@ -273,9 +234,9 @@ def aggregate_question_fill(
             (
                 c,
                 BubbleFill(
-                    bf.fill_ratio,
+                    bf.mean_ink,
                     BubbleResult.AMBIGUOUS if c in multi_choices else BubbleResult.BLANK,
-                    bf.trace_ratio,
+                    bf.peak_ink,
                     bf.blob_ratio,
                 ),
             )
@@ -285,24 +246,24 @@ def aggregate_question_fill(
             result=BubbleResult.MULTIPLE,
             marked_choices=multi_choices,
             bubble_fills=updated,
-            confidence=max(0.0, best.trace_ratio - second.trace_ratio),
+            confidence=max(0.0, best.peak_ink - second.peak_ink),
         )
 
     is_filled = (
-        best.fill_ratio >= thresholds.filled_min_mean_ink
+        best.mean_ink >= thresholds.filled_min_mean_ink
         and best.blob_ratio >= thresholds.filled_min_blob_ratio
     )
     result = BubbleResult.FILLED if is_filled else BubbleResult.AMBIGUOUS
-    gap = max(0.0, best.trace_ratio - second.trace_ratio)
-    confidence = gap + best.fill_ratio
+    gap = max(0.0, best.peak_ink - second.peak_ink)
+    confidence = gap + best.mean_ink
 
     updated = tuple(
         (
             c,
             BubbleFill(
-                bf.fill_ratio,
+                bf.mean_ink,
                 result if c == best_choice else BubbleResult.BLANK,
-                bf.trace_ratio,
+                bf.peak_ink,
                 bf.blob_ratio,
             ),
         )
@@ -347,7 +308,6 @@ def classify_sheet(
     *,
     ink_map: np.ndarray | None = None,
 ) -> dict[int, QuestionFill]:
-    """Classify every question on an already-aligned sheet image."""
     resolved_ink = (
         ink_map if ink_map is not None else calibrate_sheet_ink(to_grayscale(image), page)
     )
@@ -367,7 +327,6 @@ def classify_key_version(
     *,
     ink_map: np.ndarray | None = None,
 ) -> QuestionFill:
-    """Classify the printed Key Version strip (A-D) on an aligned sheet."""
     resolved_ink = (
         ink_map if ink_map is not None else calibrate_sheet_ink(to_grayscale(image), page)
     )

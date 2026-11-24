@@ -19,6 +19,12 @@ ROTATIONS = (
     cv2.ROTATE_90_COUNTERCLOCKWISE,
 )
 
+MIN_WINDOW_CONTRAST = 40
+MIN_MARKER_AREA = 150
+MIN_AREA_RATIO = 0.4
+MIN_ASPECT_RATIO = 0.75
+BORDER_MARGIN_FACTOR = 0.6
+
 
 class ScanAlignmentError(Exception):
     pass
@@ -31,8 +37,7 @@ def _fiducial_center_px(x_mm: float, y_mm: float, page: PageSize) -> list[float]
 
 
 def marker_long_side_ok(long_side: float, fid_px: float, touches_border: bool) -> bool:
-    """A marker clipped by the image border may be as short as half the nominal size."""
-    min_long_side = fid_px * 0.5 if touches_border else fid_px * 0.75
+    min_long_side = fid_px * 0.5 if touches_border else fid_px * 0.55
     return min_long_side <= long_side <= fid_px * 1.3
 
 
@@ -48,16 +53,16 @@ def _find_marker_in_window(
 ) -> tuple[float, float] | None:
     img_h, img_w = gray_image.shape[:2]
     sub = gray_image[y0:y1, x0:x1]
-    if sub.size == 0 or int(sub.max()) - int(sub.min()) < 40:
+    if sub.size == 0 or int(sub.max()) - int(sub.min()) < MIN_WINDOW_CONTRAST:
         return None
     _, binary = cv2.threshold(sub, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    border_margin = fid_px * 0.6
+    border_margin = fid_px * BORDER_MARGIN_FACTOR
     candidates: list[tuple[float, float]] = []
     for contour in contours:
         area = cv2.contourArea(contour)
-        if area < 150:
+        if area < MIN_MARKER_AREA:
             continue
         (cx, cy), (w, h), _ = cv2.minAreaRect(contour)
         if w == 0 or h == 0:
@@ -72,9 +77,12 @@ def _find_marker_in_window(
         near_bottom = (gy + bh) >= img_h - border_margin
         touches_border = near_left or near_right or near_top or near_bottom
 
-        if not marker_long_side_ok(long_side, fid_px, touches_border) or area / (w * h) < 0.4:
+        if (
+            not marker_long_side_ok(long_side, fid_px, touches_border)
+            or area / (w * h) < MIN_AREA_RATIO
+        ):
             continue
-        if not touches_border and short_side / long_side < 0.75:
+        if not touches_border and short_side / long_side < MIN_ASPECT_RATIO:
             continue
         if near_left and bw < fid_px * 0.9:
             gcx = (gx + bw) - fid_px / 2.0
@@ -101,7 +109,7 @@ def _find_alignment_pairs(
     page_w_px, page_h_px = mm_to_px(page.width_mm, page.height_mm, page)
     fid_px = mm_length_to_px(FIDUCIAL_SIZE_MM, page) * (min(img_w, img_h) / page_w_px)
 
-    win_h, win_w = img_h // 4, img_w // 4
+    win_h, win_w = int(img_h * 0.30), img_w // 3
     windows = (
         (0, 0, win_w, win_h, 0.0, 0.0),
         (img_w - win_w, 0, img_w, win_h, float(img_w), 0.0),
@@ -168,33 +176,44 @@ def align_scan(
         dtype=np.float32,
     )
     width_px, height_px = mm_to_px(page.width_mm, page.height_mm, page)
-    border_value = (255, 255, 255) if image.ndim == 3 else 255
+    gray_src = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
 
-    best_warped: np.ndarray | None = None
+    best_rotation: int | None = None
+    best_matrix: np.ndarray | None = None
+    best_warped_gray: np.ndarray | None = None
     best_intensity = float("inf")
 
     for rotation in ROTATIONS:
-        rotated = image if rotation is None else cv2.rotate(image, rotation)
-        gray = cv2.cvtColor(rotated, cv2.COLOR_BGR2GRAY) if rotated.ndim == 3 else rotated
+        gray = gray_src if rotation is None else cv2.rotate(gray_src, rotation)
         pairs = _find_alignment_pairs(gray, dst_corners, template_spec, page)
         if pairs is None:
             continue
 
         src_pts, dst_pts = pairs
         matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
-        warped = cv2.warpPerspective(
-            rotated,
+        warped_gray = cv2.warpPerspective(
+            gray,
             matrix,
             (width_px, height_px),
             borderMode=cv2.BORDER_CONSTANT,
-            borderValue=border_value,
+            borderValue=255,
         )
-        warped_gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY) if warped.ndim == 3 else warped
         intensity = _mid_marker_mean_intensity(warped_gray, template_spec, page)
         if intensity < best_intensity:
             best_intensity = intensity
-            best_warped = warped
+            best_rotation = rotation
+            best_matrix = matrix
+            best_warped_gray = warped_gray
 
-    if best_warped is None:
+    if best_matrix is None or best_warped_gray is None:
         raise ScanAlignmentError("Could not find four corner fiducials in any orientation.")
-    return best_warped
+    if image.ndim == 2:
+        return best_warped_gray
+    rotated_color = image if best_rotation is None else cv2.rotate(image, best_rotation)
+    return cv2.warpPerspective(
+        rotated_color,
+        best_matrix,
+        (width_px, height_px),
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(255, 255, 255),
+    )

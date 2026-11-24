@@ -1,7 +1,3 @@
-"""Draws a blank answer sheet -- fiducials, text fields, and the answer bubble grid --
-from a TemplateSpec.
-"""
-
 import cv2
 import numpy as np
 
@@ -31,7 +27,6 @@ ROW_GROUP_MARKER_SIZE_MM = 3.0
 
 
 def font_pt_to_scale(font_size_pt: float, page: PageSize) -> float:
-    """Convert font size in points to OpenCV Hershey Simplex font scale."""
     font_height_px = (font_size_pt / 72.0) * page.dpi
     return font_height_px / BASE_HERSHEY_TOTAL_HEIGHT_PX
 
@@ -79,7 +74,6 @@ def draw_text_field_values(
     text_field_specs: tuple[TextFieldSpecMm, ...] = DEFAULT_TEXT_FIELDS,
     page: PageSize = PAGE,
 ) -> None:
-    """Draw sample text inside the header text fields (e.g. for synthetic sheets)."""
     font_scale = font_pt_to_scale(12.0, page)
     for field in text_field_specs:
         text = (values.get(field.id) or "").strip()
