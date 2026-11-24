@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { computeQuizStatistics } from "./statistics.ts";
-import type { Paper, Quiz } from "./workspace/schema.ts";
+import { computeQuizStatistics } from "../src/lib/quizStatistics.ts";
+import type { Paper, Quiz } from "../src/lib/workspace/schema.ts";
 
 const quiz: Quiz = {
   id: "q1",
@@ -21,7 +21,7 @@ const quiz: Quiz = {
 function makePaper(id: string, answers: string[], keyVersion?: "A" | "B"): Paper {
   return {
     id,
-    batchId: "b1",
+    quizId: "q1",
     status: "done",
     answers,
     flags: {},
@@ -29,7 +29,7 @@ function makePaper(id: string, answers: string[], keyVersion?: "A" | "B"): Paper
     keyVersion,
     nameText: "",
     dateText: "",
-    sectionText: "",
+    classText: "",
     studentId: null,
     corrections: {},
     score: 0,
@@ -45,10 +45,7 @@ test("computeQuizStatistics returns nulls when no done papers exist", () => {
   assert.equal(stats.avgPoints, null);
 });
 
-test("computeQuizStatistics computes min, max, avg, median, stddev, and buckets across key versions", () => {
-  // Paper 1 (Key A): 4/4 = 8 pts (100%)
-  // Paper 2 (Key B): 3/4 = 6 pts (75%)
-  // Paper 3 (Key A): 1/4 = 2 pts (25%)
+test("computeQuizStatistics computes min, max, avg, median, stddev, and 10 equal buckets across key versions", () => {
   const stats = computeQuizStatistics(quiz, [
     makePaper("p1", ["A", "B", "C", "D"], "A"),
     makePaper("p2", ["D", "C", "B", "D"], "B"),
@@ -64,9 +61,10 @@ test("computeQuizStatistics computes min, max, avg, median, stddev, and buckets 
   assert.equal(stats.maxPct, 100);
   assert.equal(stats.medianPct, 75);
   assert.ok((stats.stdDevPct ?? 0) > 30);
-  assert.equal(stats.buckets[0].count, 1); // 90-100
-  assert.equal(stats.buckets[2].count, 1); // 70-79
-  assert.equal(stats.buckets[4].count, 1); // < 60
+  assert.equal(stats.buckets.length, 10);
+  assert.equal(stats.buckets[0].count, 1);
+  assert.equal(stats.buckets[2].count, 1);
+  assert.equal(stats.buckets[7].count, 1);
 });
 
 test("computeQuizStatistics does not inherit Key A questionRules onto Key B", () => {
@@ -83,8 +81,8 @@ test("computeQuizStatistics does not inherit Key A questionRules onto Key B", ()
     createdAt: "2026-11-18T00:00:00.000Z",
   };
   const stats = computeQuizStatistics(versionQuiz, [
-    makePaper("pa", ["B", "A"], "A"), // 1 + 2 = 3 pts (75%)
-    makePaper("pb", ["B", "C"], "B"), // 0 + 2 = 2 pts (50%, NOT 3 pts)
+    makePaper("pa", ["B", "A"], "A"),
+    makePaper("pb", ["B", "C"], "B"),
   ]);
   assert.equal(stats.minPoints, 2);
   assert.equal(stats.maxPoints, 3);

@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { rescore } from "./scoring.ts";
+import { scorePaper } from "../src/lib/scoring.ts";
 
 test("trace-ambiguous case: 5.0% before correction, 10.0% after correction", () => {
   const answerKey = Array(20).fill("A");
   const answers = ["A", "A", ...Array(18).fill("")];
   const flags = { "2": "ambiguous" as const };
 
-  const before = rescore({
+  const before = scorePaper({
     answerKey,
     answers,
     flags,
@@ -16,7 +16,7 @@ test("trace-ambiguous case: 5.0% before correction, 10.0% after correction", () 
   assert.equal(before.score, 5.0);
   assert.equal(before.needsReview, true);
 
-  const after = rescore({
+  const after = scorePaper({
     answerKey,
     answers,
     flags,
@@ -27,22 +27,20 @@ test("trace-ambiguous case: 5.0% before correction, 10.0% after correction", () 
 });
 
 test("weighted points compute exact percentage", () => {
-  const result = rescore({
+  const result = scorePaper({
     answerKey: ["A", "B", "C", "D"],
     points: [2, 1, 3, 0],
     answers: ["A", "C", "C", "A"],
     flags: {},
     corrections: {},
   });
-  // Earned 2 + 3 = 5 out of 2 + 1 + 3 + 0 = 6
   assert.ok(Math.abs(result.score - (5 / 6) * 100) < 1e-9);
   assert.equal(result.needsReview, false);
 });
 
 test("multi-choice key A+B and multiple-mark flag behavior", () => {
   const answerKey = ["A+B", "A+B", "A+B"];
-  // Q1="A" (valid), Q2="B" (valid), Q3="A+B" (flagged multiple -> 0 until corrected)
-  const before = rescore({
+  const before = scorePaper({
     answerKey,
     answers: ["A", "B", "A+B"],
     flags: { "3": "multiple" },
@@ -51,7 +49,7 @@ test("multi-choice key A+B and multiple-mark flag behavior", () => {
   assert.ok(Math.abs(before.score - (2 / 3) * 100) < 1e-9);
   assert.equal(before.needsReview, true);
 
-  const afterMatch = rescore({
+  const afterMatch = scorePaper({
     answerKey,
     answers: ["A", "B", "A+B"],
     flags: { "3": "multiple" },
@@ -63,7 +61,7 @@ test("multi-choice key A+B and multiple-mark flag behavior", () => {
 
 test("blank answers require review until explicitly corrected", () => {
   const answerKey = ["A", "B", "C", "D"];
-  const allBlank = rescore({
+  const allBlank = scorePaper({
     answerKey,
     answers: ["", "", "", ""],
     flags: {},
@@ -72,7 +70,7 @@ test("blank answers require review until explicitly corrected", () => {
   assert.equal(allBlank.score, 0);
   assert.equal(allBlank.needsReview, true);
 
-  const confirmedBlank = rescore({
+  const confirmedBlank = scorePaper({
     answerKey,
     answers: ["", "", "", ""],
     flags: {},
@@ -87,8 +85,7 @@ test("corrections that match and do not match the key both clear flags", () => {
   const answers = ["A", "B", "A+C", "E"];
   const flags = { "3": "multiple" as const, "4": "ambiguous" as const };
 
-  // Correct only Q3 -> still needsReview because Q4 is uncorrected
-  const partial = rescore({
+  const partial = scorePaper({
     answerKey,
     answers,
     flags,
@@ -97,8 +94,7 @@ test("corrections that match and do not match the key both clear flags", () => {
   assert.equal(partial.score, 75);
   assert.equal(partial.needsReview, true);
 
-  // Correct Q4 to a wrong choice "E" -> clears flag, does not add points
-  const full = rescore({
+  const full = scorePaper({
     answerKey,
     answers,
     flags,
@@ -109,7 +105,7 @@ test("corrections that match and do not match the key both clear flags", () => {
 });
 
 test("backend parity (a): key [B]+[C]*19, all answers A, correction {1: B} -> 5.0", () => {
-  const result = rescore({
+  const result = scorePaper({
     answerKey: ["B", ...Array(19).fill("C")],
     answers: Array(20).fill("A"),
     flags: {},
@@ -120,7 +116,7 @@ test("backend parity (a): key [B]+[C]*19, all answers A, correction {1: B} -> 5.
 });
 
 test("backend parity (b): key [A+B]+[C]*19, points [2]+[0]*19, answers [A]+['']*19 -> 100.0", () => {
-  const result = rescore({
+  const result = scorePaper({
     answerKey: ["A+B", ...Array(19).fill("C")],
     points: [2, ...Array(19).fill(0)],
     answers: ["A", ...Array(19).fill("")],
@@ -134,7 +130,7 @@ test("backend parity (b): key [A+B]+[C]*19, points [2]+[0]*19, answers [A]+['']*
 test("throws an Error when points length does not match answerKey length", () => {
   assert.throws(
     () =>
-      rescore({
+      scorePaper({
         answerKey: ["A", "B", "C"],
         points: [1, 2],
         answers: ["A", "B", "C"],
@@ -146,7 +142,7 @@ test("throws an Error when points length does not match answerKey length", () =>
 });
 
 test("supports partial-credit alternate answers and attempted-incorrect points", () => {
-  const result = rescore({
+  const result = scorePaper({
     answerKey: ["A", "A", "A", "A"],
     points: [2, 2, 2, 2],
     questionRules: [
@@ -159,7 +155,6 @@ test("supports partial-credit alternate answers and attempted-incorrect points",
     flags: {},
     corrections: {},
   });
-  // Q1=1, Q2=-0.5, Q3=0 (blank), Q4=0.25 => 0.75 / (2+2+2+3=9)
   assert.equal(result.earnedPoints, 0.75);
   assert.equal(result.totalPoints, 9);
   assert.ok(Math.abs(result.score - (0.75 / 9) * 100) < 1e-9);

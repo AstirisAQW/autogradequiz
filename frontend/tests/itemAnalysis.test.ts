@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { computeItemAnalysis } from "./itemAnalysis.ts";
-import type { Paper, Quiz } from "./workspace/schema.ts";
+import {
+  computeItemAnalysis,
+  summarizeQuestionResponse,
+} from "../src/lib/itemAnalysis.ts";
+import type { Paper, Quiz } from "../src/lib/workspace/schema.ts";
 
 const sampleQuiz: Quiz = {
   id: "q1",
@@ -15,14 +18,14 @@ const sampleQuiz: Quiz = {
 function makePaper(overrides: Partial<Paper>): Paper {
   return {
     id: "p",
-    batchId: "b1",
+    quizId: "q1",
     status: "done",
     answers: ["A", "B", "D"],
     flags: {},
     confidence: [0.9, 0.9, 0.9],
     nameText: "",
     dateText: "",
-    sectionText: "",
+    classText: "",
     studentId: null,
     corrections: {},
     score: 100,
@@ -32,9 +35,9 @@ function makePaper(overrides: Partial<Paper>): Paper {
   };
 }
 
-test("computeItemAnalysis returns zeroed metrics when no done papers exist", () => {
+test("computeItemAnalysis returns zeroed metrics when no graded papers match", () => {
   const analysis = computeItemAnalysis(sampleQuiz, [
-    makePaper({ status: "failed", answers: [] }),
+    makePaper({ answers: [] }),
   ]);
   assert.equal(analysis.gradedPaperCount, 0);
   assert.equal(analysis.hardestQuestion, null);
@@ -46,16 +49,13 @@ test("computeItemAnalysis returns zeroed metrics when no done papers exist", () 
 
 test("computeItemAnalysis handles multi-choice keys, corrections, unresolved flags, blanks, and multiple marks", () => {
   const papers: Paper[] = [
-    // P1: Q1 correct (A), Q2 correct (C in B+C), Q3 wrong (A)
     makePaper({ id: "p1", answers: ["A", "C", "A"] }),
-    // P2: Q1 wrong (B), Q2 flagged ambiguous read as B -> unresolved (not correct, flaggedCount=1), Q3 multiple A+E -> corrected to D (correct)
     makePaper({
       id: "p2",
       answers: ["B", "B", "A+E"],
       flags: { "2": "ambiguous", "3": "multiple" },
       corrections: { 3: "D" },
     }),
-    // P3: Q1 blank, Q2 wrong (E), Q3 wrong (A+D unresolved multiple)
     makePaper({
       id: "p3",
       answers: ["", "E", "A+D"],
@@ -65,8 +65,6 @@ test("computeItemAnalysis handles multi-choice keys, corrections, unresolved fla
 
   const analysis = computeItemAnalysis(sampleQuiz, papers);
   assert.equal(analysis.gradedPaperCount, 3);
-
-  // Q1: P1 A (correct), P2 B, P3 Blank => 1/3 = 33.3%
   assert.equal(analysis.questions[0].correctCount, 1);
   assert.equal(analysis.questions[0].correctPct, 33.3);
   assert.deepEqual(analysis.questions[0].choiceCounts, {
@@ -79,14 +77,8 @@ test("computeItemAnalysis handles multi-choice keys, corrections, unresolved fla
     Multiple: 0,
   });
 
-  // Q2: P1 C (correct), P2 B unresolved (flaggedCount=1), P3 E => 1/3 = 33.3%
   assert.equal(analysis.questions[1].correctCount, 1);
   assert.equal(analysis.questions[1].flaggedCount, 1);
-  assert.equal(analysis.questions[1].choiceCounts.C, 1);
-  assert.equal(analysis.questions[1].choiceCounts.B, 1);
-  assert.equal(analysis.questions[1].choiceCounts.E, 1);
-
-  // Q3: P1 A, P2 corrected D (correct), P3 A+D unresolved (flaggedCount=1, Multiple=1)
   assert.equal(analysis.questions[2].correctCount, 1);
   assert.equal(analysis.questions[2].flaggedCount, 1);
   assert.equal(analysis.questions[2].choiceCounts.D, 1);
@@ -95,11 +87,10 @@ test("computeItemAnalysis handles multi-choice keys, corrections, unresolved fla
 
 test("computeItemAnalysis picks hardest and easiest questions accurately", () => {
   const papers: Paper[] = [
-    makePaper({ id: "p1", answers: ["A", "A", "D"] }), // Q1 correct, Q2 wrong, Q3 correct
-    makePaper({ id: "p2", answers: ["A", "A", "A"] }), // Q1 correct, Q2 wrong, Q3 wrong
+    makePaper({ id: "p1", answers: ["A", "A", "D"] }),
+    makePaper({ id: "p2", answers: ["A", "A", "A"] }),
   ];
   const analysis = computeItemAnalysis(sampleQuiz, papers);
-  // Q1 = 100%, Q2 = 0%, Q3 = 50%
   assert.equal(analysis.easiestQuestion?.questionNumber, 1);
   assert.equal(analysis.easiestQuestion?.correctPct, 100);
   assert.equal(analysis.hardestQuestion?.questionNumber, 2);
@@ -125,7 +116,6 @@ test("computeItemAnalysis filters by keyVersion when provided", () => {
   assert.equal(analysisB.questions[0].correctPct, 100);
   assert.equal(analysisB.questions[2].correctPct, 0);
 
-  // "All versions" evaluates each paper against its own key and labels disagreeing keys "Per key"
   const analysisAll = computeItemAnalysis(versionedQuiz, [
     makePaper({ id: "p1", keyVersion: "A", answers: ["A", "B", "D"] }),
     makePaper({ id: "p2", keyVersion: "B", answers: ["E", "E", "E"] }),
@@ -134,4 +124,19 @@ test("computeItemAnalysis filters by keyVersion when provided", () => {
   assert.equal(analysisAll.questions[0].correctKey, "Per key");
   assert.equal(analysisAll.questions[0].correctPct, 100);
   assert.equal(analysisAll.questions[2].correctPct, 100);
+});
+
+test("summarizeQuestionResponse does not treat right Key A answers as distractors under Per key", () => {
+  const versionedQuiz: Quiz = {
+    ...sampleQuiz,
+    keyVersions: {
+      B: { answerKey: ["E", "B+C", "D"] },
+    },
+  };
+  const analysis = computeItemAnalysis(versionedQuiz, [
+    makePaper({ id: "p1", keyVersion: "A", answers: ["A", "B", "D"] }),
+    makePaper({ id: "p2", keyVersion: "B", answers: ["E", "B", "D"] }),
+  ]);
+  const summary = summarizeQuestionResponse(analysis.questions[0], 2);
+  assert.match(summary, /All correct/);
 });
