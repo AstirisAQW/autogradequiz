@@ -24,29 +24,15 @@ def write_template_files(template_spec: TemplateSpec, output_root: Path) -> None
     template = build_template(template_spec)
     json_filename = f"autograde{template_spec.question_count}Questions_template.json"
     json_path = output_dir / json_filename
-
-    old_json = output_dir / "template.json"
-    if old_json.exists():
-        old_json.unlink()
-
     json_path.write_text(json.dumps(template_to_json_dict(template), indent=2), encoding="utf-8")
 
     sheet = render_sheet(template_spec)
     image_filename = f"autograde{template_spec.question_count}Questions.png"
     sheet_path = output_dir / image_filename
-
-    old_sheet = output_dir / "sheet.png"
-    if old_sheet.exists():
-        old_sheet.unlink()
-
     cv2.imwrite(str(sheet_path), sheet)
 
     pdf_filename = f"autograde{template_spec.question_count}Questions.pdf"
     pdf_path = output_dir / pdf_filename
-
-    old_pdf = output_dir / "sheet.pdf"
-    if old_pdf.exists():
-        old_pdf.unlink()
 
     rgb_sheet = cv2.cvtColor(sheet, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(rgb_sheet)
