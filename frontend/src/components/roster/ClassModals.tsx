@@ -6,45 +6,50 @@ import { Card } from "@/components/ui/Card";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormField, TextInput } from "@/components/ui/Field";
 import { useToast } from "@/components/ui/Toast";
+import { getErrorMessage } from "@/lib/api";
 import {
-  deleteSection,
-  saveSection,
+  deleteClass,
+  saveClass,
   saveStudent,
-  type SectionWithCount,
+  type ClassWithCount,
   type Student,
 } from "@/lib/workspace";
 
-export function InlineNewSectionCard({
+export function InlineNewClassCard({
   onCreated,
   onCancel,
 }: {
-  onCreated: (sectionId: string) => Promise<void>;
+  onCreated: (classId: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const { push: pushToast } = useToast();
   const [name, setName] = useState("");
+  const [touched, setTouched] = useState(false);
   const [term, setTerm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const clientErr = !name.trim() ? "Enter a class name" : null;
+  const visibleError = error ?? (touched ? clientErr : null);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim() || busy) return;
+    setTouched(true);
+    if (clientErr || busy) return;
     setBusy(true);
     setError(null);
     try {
-      const created = await saveSection({
+      const created = await saveClass({
         name: name.trim(),
         term: term.trim(),
       });
       await onCreated(created.id);
       setName("");
       setTerm("");
+      setTouched(false);
       pushToast(`Created class "${created.name}".`, "success");
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Could not create class.",
-      );
+      setError(getErrorMessage(err, "Could not create class."));
     } finally {
       setBusy(false);
     }
@@ -52,54 +57,51 @@ export function InlineNewSectionCard({
 
   return (
     <Card>
-      <form onSubmit={(e) => void handleSubmit(e)} className="space-y-3">
+      <form
+        noValidate
+        onSubmit={(e) => void handleSubmit(e)}
+        className="space-y-3"
+      >
         <FormField
-          id="new-section-name"
+          id="new-class-name"
           label="Class name"
-          error={error}
+          error={visibleError}
         >
           <TextInput
-            id="new-section-name"
+            id="new-class-name"
             type="text"
-            required
+            aria-required="true"
+            hasError={Boolean(visibleError)}
             placeholder="e.g. 10-Rizal"
             value={name}
+            onBlur={() => setTouched(true)}
             onChange={(e) => {
               setName(e.target.value);
               if (error) setError(null);
             }}
-            className="py-1.5"
           />
         </FormField>
-        <FormField id="new-section-term" label="Term (optional)">
+        <FormField id="new-class-term" label="Term (optional)">
           <TextInput
-            id="new-section-term"
+            id="new-class-term"
             type="text"
-            placeholder="e.g. Fall 2026"
+            placeholder="e.g. Midterm"
             value={term}
             onChange={(e) => setTerm(e.target.value)}
-            className="py-1.5"
           />
         </FormField>
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             variant="secondary"
             size="sm"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={onCancel}
             disabled={busy}
           >
             Cancel
           </Button>
-          <Button
-            type="submit"
-            variant="primary"
-            size="sm"
-            disabled={!name.trim() || busy}
-            disabledReason={
-              !name.trim() ? "Class name is required" : undefined
-            }
-          >
-            {busy ? "Creating…" : "Create"}
+          <Button type="submit" variant="primary" size="sm" disabled={busy}>
+            {busy ? "Creating..." : "Create class"}
           </Button>
         </div>
       </form>
@@ -107,41 +109,44 @@ export function InlineNewSectionCard({
   );
 }
 
-export function EditSectionDialog({
+export function EditClassDialog({
   open,
-  section,
+  classItem,
   onSaved,
   onClose,
 }: {
   open: boolean;
-  section: SectionWithCount | null;
+  classItem: ClassWithCount | null;
   onSaved: () => Promise<void>;
   onClose: () => void;
 }) {
   const { push: pushToast } = useToast();
-  const [name, setName] = useState(section?.name ?? "");
-  const [term, setTerm] = useState(section?.term ?? "");
+  const [name, setName] = useState(classItem?.name ?? "");
+  const [touched, setTouched] = useState(false);
+  const [term, setTerm] = useState(classItem?.term ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const clientErr = !name.trim() ? "Enter a class name" : null;
+  const visibleError = error ?? (touched ? clientErr : null);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!section || !name.trim() || busy) return;
+    setTouched(true);
+    if (!classItem || clientErr || busy) return;
     setBusy(true);
     setError(null);
     try {
-      await saveSection({
-        id: section.id,
+      await saveClass({
+        id: classItem.id,
         name: name.trim(),
         term: term.trim(),
       });
       await onSaved();
       onClose();
-      pushToast("Class updated.", "success");
+      pushToast(`Updated class "${name.trim()}".`, "success");
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Could not update class.",
-      );
+      setError(getErrorMessage(err, "Could not update class."));
     } finally {
       setBusy(false);
     }
@@ -155,42 +160,48 @@ export function EditSectionDialog({
       hideFooter
       onClose={onClose}
     >
-      <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+      <form
+        noValidate
+        onSubmit={(e) => void handleSubmit(e)}
+        className="space-y-4"
+      >
         <FormField
-          id="edit-section-name"
+          id="edit-class-name"
           label="Class name"
-          error={error}
+          error={visibleError}
         >
           <TextInput
-            id="edit-section-name"
+            id="edit-class-name"
             type="text"
-            required
+            aria-required="true"
+            hasError={Boolean(visibleError)}
             value={name}
+            onBlur={() => setTouched(true)}
             onChange={(e) => {
               setName(e.target.value);
               if (error) setError(null);
             }}
           />
         </FormField>
-        <FormField id="edit-section-term" label="Term (optional)">
+        <FormField id="edit-class-term" label="Term (optional)">
           <TextInput
-            id="edit-section-term"
+            id="edit-class-term"
             type="text"
             value={term}
             onChange={(e) => setTerm(e.target.value)}
           />
         </FormField>
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose} disabled={busy}>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button
+            variant="secondary"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onClose}
+            disabled={busy}
+          >
             Cancel
           </Button>
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={!name.trim() || busy}
-            disabledReason={!name.trim() ? "Class name is required" : undefined}
-          >
-            {busy ? "Saving…" : "Save"}
+          <Button type="submit" variant="primary" disabled={busy}>
+            {busy ? "Saving..." : "Save class"}
           </Button>
         </div>
       </form>
@@ -198,14 +209,14 @@ export function EditSectionDialog({
   );
 }
 
-export function DeleteSectionDialog({
+export function DeleteClassDialog({
   open,
-  section,
+  classItem,
   onDeleted,
   onClose,
 }: {
   open: boolean;
-  section: SectionWithCount | null;
+  classItem: ClassWithCount | null;
   onDeleted: () => Promise<void>;
   onClose: () => void;
 }) {
@@ -213,19 +224,16 @@ export function DeleteSectionDialog({
   const [busy, setBusy] = useState(false);
 
   async function handleConfirm() {
-    if (!section || busy) return;
+    if (!classItem || busy) return;
     setBusy(true);
     try {
-      const deletedName = section.name;
-      await deleteSection(section.id);
+      const deletedName = classItem.name;
+      await deleteClass(classItem.id);
       onClose();
       await onDeleted();
       pushToast(`Deleted class "${deletedName}".`, "success");
     } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Could not delete class.",
-        "error",
-      );
+      pushToast(getErrorMessage(err, "Could not delete class."), "error");
     } finally {
       setBusy(false);
     }
@@ -234,8 +242,8 @@ export function DeleteSectionDialog({
   return (
     <Dialog
       open={open}
-      title={`Delete class "${section?.name ?? "class"}"?`}
-      description={`This removes the class "${section?.name ?? ""}"${section?.term ? ` (${section.term})` : ""}. ${section?.studentCount ?? 0} enrolled student${section?.studentCount === 1 ? "" : "s"} will be unassigned from this class (student records are kept), and any quizzes or batches linked to this class will have their class link cleared.`}
+      title={`Delete class "${classItem?.name ?? "class"}"?`}
+      description="Students stay in the directory, and any quizzes linked to this class remain available."
       confirmLabel="Delete class"
       confirmVariant="danger"
       busy={busy}
@@ -247,17 +255,17 @@ export function DeleteSectionDialog({
 
 export function AddStudentPickerDialog({
   open,
-  section,
+  classItem,
   students,
   onUpdated,
-  onCreateNewInSection,
+  onCreateNewInClass,
   onClose,
 }: {
   open: boolean;
-  section: SectionWithCount | null;
+  classItem: ClassWithCount | null;
   students: Student[];
   onUpdated: () => Promise<void>;
-  onCreateNewInSection: () => void;
+  onCreateNewInClass: () => void;
   onClose: () => void;
 }) {
   const { push: pushToast } = useToast();
@@ -265,10 +273,10 @@ export function AddStudentPickerDialog({
   const [addingId, setAddingId] = useState<string | null>(null);
 
   const available = useMemo(() => {
-    if (!section) return [];
+    if (!classItem) return [];
     const q = query.trim().toLowerCase();
     return students
-      .filter((stu) => !stu.sectionIds.includes(section.id))
+      .filter((stu) => !stu.classIds.includes(classItem.id))
       .filter((stu) => {
         if (!q) return true;
         return (
@@ -279,31 +287,28 @@ export function AddStudentPickerDialog({
         );
       })
       .sort((a, b) => a.lastName.localeCompare(b.lastName));
-  }, [students, section, query]);
+  }, [students, classItem, query]);
 
   async function handleAdd(student: Student) {
-    if (!section || addingId !== null) return;
+    if (!classItem || addingId !== null) return;
     setAddingId(student.id);
     try {
-      const nextIds = Array.from(new Set([...student.sectionIds, section.id]));
+      const nextIds = Array.from(new Set([...student.classIds, classItem.id]));
       await saveStudent({
         id: student.id,
         studentCode: student.studentCode,
         firstName: student.firstName,
         lastName: student.lastName,
         externalRef: student.externalRef,
-        sectionIds: nextIds,
+        classIds: nextIds,
       });
       await onUpdated();
       pushToast(
-        `Added ${student.firstName} ${student.lastName} to ${section.name}.`,
+        `Added ${student.firstName} ${student.lastName} to ${classItem.name}.`,
         "success",
       );
     } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Could not add student.",
-        "error",
-      );
+      pushToast(getErrorMessage(err, "Could not add student."), "error");
     } finally {
       setAddingId(null);
     }
@@ -312,7 +317,7 @@ export function AddStudentPickerDialog({
   return (
     <Dialog
       open={open}
-      title={`Add student to ${section?.name ?? "class"}`}
+      title={`Add student to ${classItem?.name ?? "class"}`}
       cancelLabel="Done"
       onClose={onClose}
     >
@@ -320,20 +325,20 @@ export function AddStudentPickerDialog({
         <TextInput
           type="search"
           aria-label="Search students to add"
-          placeholder="Search by name, ID, or external ref..."
+          placeholder="Search by name, Student ID, or LRN"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <div className="max-h-64 divide-y divide-[var(--border-hairline)] overflow-y-auto rounded-[8px] border border-[var(--border-hairline)]">
+        <div className="max-h-64 divide-y divide-[var(--border-hairline)] overflow-y-auto rounded-lg border border-[var(--border-hairline)]">
           {available.length === 0 ? (
-            <div className="space-y-2 px-4 py-6 text-center text-[12px] text-[var(--text-muted)]">
+            <div className="space-y-2 px-4 py-6 text-center text-xs text-[var(--text-muted)]">
               <p>No matching students available to add.</p>
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={onCreateNewInSection}
+                onClick={onCreateNewInClass}
               >
-                Create new student in {section?.name ?? "class"}
+                Create new student in {classItem?.name ?? "class"}
               </Button>
             </div>
           ) : (
@@ -343,10 +348,10 @@ export function AddStudentPickerDialog({
                 className="flex items-center justify-between gap-3 px-3.5 py-2.5"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-[14px] font-medium text-[var(--text-primary)]">
+                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">
                     {stu.lastName}, {stu.firstName}
                   </p>
-                  <p className="font-mono text-[12px] text-[var(--text-muted)]">
+                  <p className="text-xs text-[var(--text-muted)] tabular-nums">
                     {stu.studentCode}
                   </p>
                 </div>
@@ -356,7 +361,7 @@ export function AddStudentPickerDialog({
                   disabled={addingId === stu.id}
                   onClick={() => void handleAdd(stu)}
                 >
-                  {addingId === stu.id ? "Adding…" : "Add"}
+                  {addingId === stu.id ? "Adding..." : "Add"}
                 </Button>
               </div>
             ))

@@ -1,25 +1,32 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, type ReactNode } from "react";
+import { ConfirmationGate } from "@/components/quiz/ConfirmationGate";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { DocumentIcon } from "@/components/ui/Icons";
+import { downloadTableCsv, slugifyFilename } from "@/lib/csvExport";
+import { computeQuizStatistics } from "@/lib/quizStatistics";
 import { formatPointsValue } from "@/lib/scoring";
-import { computeQuizStatistics } from "@/lib/statistics";
 import type { Paper, Quiz } from "@/lib/workspace";
+
+const MIN_CONFIRMED_FOR_STATS = 2;
 
 interface StatisticsTabProps {
   quiz: Quiz;
-  batchPapers: Paper[];
-  allPapers: Paper[];
-  hasMultipleBatches: boolean;
+  papers: Paper[];
+  provisionalBanner?: ReactNode;
   onGoToPapers?: () => void;
+  onUploadPapers?: () => void;
 }
 
-function fmtPoints(val: number | null): string {
+function fmtEarnedTotal(val: number | null, total: number | null): string {
+  if (val === null || total === null) return "—";
+  return `${formatPointsValue(val)} / ${formatPointsValue(total)} pts`;
+}
+
+function fmtPts(val: number | null): string {
   if (val === null) return "—";
-  return formatPointsValue(val);
+  return `${formatPointsValue(val)} pts`;
 }
 
 function fmtPct(val: number | null): string {
@@ -29,129 +36,117 @@ function fmtPct(val: number | null): string {
 
 export function StatisticsTab({
   quiz,
-  batchPapers,
-  allPapers,
-  hasMultipleBatches,
+  papers,
+  provisionalBanner,
   onGoToPapers,
+  onUploadPapers,
 }: StatisticsTabProps) {
-  const [scope, setScope] = useState<"batch" | "all">("all");
-  const effectiveScope = hasMultipleBatches ? scope : "all";
-  const activePapers = effectiveScope === "all" ? allPapers : batchPapers;
+  const matchingPapers = useMemo(
+    () =>
+      papers.filter((p) => p.answers.length === quiz.answerKey.length),
+    [papers, quiz.answerKey.length],
+  );
+  const confirmedCount = useMemo(
+    () => matchingPapers.filter((p) => !p.needsReview).length,
+    [matchingPapers],
+  );
+  const unconfirmedCount = matchingPapers.length - confirmedCount;
 
   const stats = useMemo(
-    () => computeQuizStatistics(quiz, activePapers),
-    [quiz, activePapers],
+    () => computeQuizStatistics(quiz, papers),
+    [quiz, papers],
   );
 
   const metricRows = [
     {
-      label: "Minimum Score",
-      points: fmtPoints(stats.minPoints),
+      label: "Minimum score",
+      points: fmtEarnedTotal(stats.minPoints, stats.totalPossiblePoints),
       pct: fmtPct(stats.minPct),
     },
     {
-      label: "Maximum Score",
-      points: fmtPoints(stats.maxPoints),
+      label: "Maximum score",
+      points: fmtEarnedTotal(stats.maxPoints, stats.totalPossiblePoints),
       pct: fmtPct(stats.maxPct),
     },
     {
-      label: "Average Score",
-      points: fmtPoints(stats.avgPoints),
+      label: "Average score",
+      points: fmtEarnedTotal(stats.avgPoints, stats.totalPossiblePoints),
       pct: fmtPct(stats.avgPct),
     },
     {
-      label: "Median Score",
-      points: fmtPoints(stats.medianPoints),
+      label: "Median score",
+      points: fmtEarnedTotal(stats.medianPoints, stats.totalPossiblePoints),
       pct: fmtPct(stats.medianPct),
     },
     {
-      label: "Standard Deviation",
-      points: fmtPoints(stats.stdDevPoints),
+      label: "Standard deviation",
+      points: fmtPts(stats.stdDevPoints),
       pct: fmtPct(stats.stdDevPct),
     },
   ];
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-[14px] font-medium text-[var(--text-primary)]">
-            Quiz Statistics ({stats.count} graded paper
-            {stats.count === 1 ? "" : "s"})
-          </p>
-          <p className="text-[12px] text-[var(--text-muted)]">
-            Includes resolved reviews, custom question weights, partial credit,
-            and active key versions.
-          </p>
-        </div>
+  function handleExportTable() {
+    if (stats.count === 0) return;
+    const slug = slugifyFilename(quiz.name);
+    downloadTableCsv(
+      `${slug}-statistics.csv`,
+      ["Metric", "Points", "Percent"],
+      metricRows.map((r) => [r.label, r.points, r.pct]),
+    );
+  }
 
-        {hasMultipleBatches && (
-          <div className="inline-flex rounded-[8px] border border-[var(--border-hairline)] bg-[var(--bg-subtle)] p-0.5 text-[12px]">
-            <button
-              type="button"
-              onClick={() => setScope("batch")}
-              className={`rounded-[6px] px-2.5 py-1 font-medium transition-colors ${
-                effectiveScope === "batch"
-                  ? "bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-xs"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-              }`}
-            >
-              Current batch
-            </button>
-            <button
-              type="button"
-              onClick={() => setScope("all")}
-              className={`rounded-[6px] px-2.5 py-1 font-medium transition-colors ${
-                effectiveScope === "all"
-                  ? "bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-xs"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-              }`}
-            >
-              All batches
-            </button>
-          </div>
-        )}
+  if (confirmedCount < MIN_CONFIRMED_FOR_STATS) {
+    const statusDescription =
+      matchingPapers.length === 0
+        ? "No papers scanned yet. Upload answer sheets to start building quiz statistics."
+        : unconfirmedCount > 0
+          ? `${confirmedCount} of ${matchingPapers.length} ${matchingPapers.length === 1 ? "paper is" : "papers are"} confirmed and ${unconfirmedCount} ${unconfirmedCount === 1 ? "needs" : "need"} review. Statistics appear once ${MIN_CONFIRMED_FOR_STATS} papers are confirmed.`
+          : "1 confirmed paper scanned. Upload 1 more paper to compute averages, spread, and score bands.";
+
+    return (
+      <ConfirmationGate
+        title={`Statistics need at least ${MIN_CONFIRMED_FOR_STATS} confirmed papers`}
+        description={statusDescription}
+        confirmed={confirmedCount}
+        needed={MIN_CONFIRMED_FOR_STATS}
+        unconfirmedCount={unconfirmedCount}
+        quizId={quiz.id}
+        onUploadPapers={onUploadPapers}
+        onGoToPapers={onGoToPapers}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {unconfirmedCount > 0 && provisionalBanner}
+
+      <div className="flex justify-end">
+        <Button variant="secondary" size="sm" onClick={handleExportTable}>
+          Export this table
+        </Button>
       </div>
 
-      {stats.count === 0 ? (
-        <EmptyState
-          icon={<DocumentIcon />}
-          title="No graded papers yet"
-          description="Upload and grade answer sheets in the Papers tab to compute class statistics."
-          action={
-            onGoToPapers ? (
-              <Button variant="primary" onClick={onGoToPapers}>
-                Go to Papers
-              </Button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card padded={false} className="overflow-hidden">
-            <div className="border-b border-[var(--border-hairline)] bg-[var(--bg-subtle)] px-4 py-2.5">
-              <h2 className="text-[13px] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-                Score Summary
-              </h2>
-            </div>
-            <table className="w-full border-collapse text-[14px]">
-              <thead className="border-b border-[var(--border-hairline)] text-[12px] uppercase tracking-wide text-[var(--text-muted)]">
+            <table className="w-full border-collapse text-sm">
+              <thead className="border-b border-[var(--border-hairline)] bg-[var(--bg-subtle)] text-xs font-semibold text-[var(--text-secondary)]">
                 <tr>
-                  <th className="px-4 py-2 text-left font-medium">Metric</th>
-                  <th className="px-4 py-2 text-right font-medium">Points</th>
-                  <th className="px-4 py-2 text-right font-medium">Percent</th>
+                  <th className="px-4 py-2.5 text-left">Metric</th>
+                  <th className="px-4 py-2.5 text-right">Points</th>
+                  <th className="px-4 py-2.5 text-right">Percent</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border-hairline)]">
                 {metricRows.map((row) => (
                   <tr key={row.label}>
-                    <td className="px-4 py-2.5 text-[var(--text-primary)]">
+                    <td className="px-4 py-3 text-[var(--text-primary)]">
                       {row.label}
                     </td>
-                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-[var(--text-primary)]">
+                    <td className="px-4 py-3 text-right tabular-nums text-[var(--text-primary)]">
                       {row.points}
                     </td>
-                    <td className="px-4 py-2.5 text-right font-mono font-medium tabular-nums text-[var(--brand-text)]">
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums text-[var(--text-primary)]">
                       {row.pct}
                     </td>
                   </tr>
@@ -161,29 +156,24 @@ export function StatisticsTab({
           </Card>
 
           <Card>
-            <h2 className="text-[14px] font-medium text-[var(--text-primary)]">
-              Score Distribution
-            </h2>
-            <p className="mt-0.5 text-[12px] text-[var(--text-muted)]">
-              Share of graded papers by percentage band
-            </p>
-            <div className="mt-4 space-y-3">
+            <h2>Score distribution (10-point bands)</h2>
+            <div className="mt-3 space-y-2.5">
               {stats.buckets.map((bucket) => (
                 <div key={bucket.label} className="space-y-1">
-                  <div className="flex items-center justify-between text-[13px]">
-                    <span className="font-medium text-[var(--text-primary)] tabular-nums">
+                  <div className="flex items-center justify-between text-[0.8125rem]">
+                    <span className="text-[var(--text-primary)] tabular-nums">
                       {bucket.label}
                     </span>
-                    <span className="font-mono text-[12px] text-[var(--text-secondary)] tabular-nums">
-                      {bucket.count} paper{bucket.count === 1 ? "" : "s"} (
-                      {bucket.pctOfClass.toFixed(1)}%)
+                    <span className="text-[var(--text-secondary)] tabular-nums">
+                      {bucket.count} {bucket.count === 1 ? "paper" : "papers"} (
+                      {bucket.pctOfClass.toFixed(0)}%)
                     </span>
                   </div>
-                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-[var(--bg-subtle)]">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--bg-subtle)]">
                     <div
                       className="h-full rounded-full bg-[var(--brand)] transition-[width]"
                       style={{
-                        width: `${Math.max(bucket.pctOfClass, bucket.count > 0 ? 4 : 0)}%`,
+                        width: `${bucket.count > 0 ? Math.max(bucket.pctOfClass, 4) : 0}%`,
                       }}
                     />
                   </div>
@@ -192,7 +182,6 @@ export function StatisticsTab({
             </div>
           </Card>
         </div>
-      )}
     </div>
   );
 }

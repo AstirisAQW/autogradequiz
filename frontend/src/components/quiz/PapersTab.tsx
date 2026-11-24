@@ -1,49 +1,33 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Badge } from "@/components/ui/Badge";
+import { PaperInspectionDrawer } from "@/components/quiz/PaperInspectionDrawer";
+import { ActionMenu } from "@/components/ui/ActionMenu";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type DataTableColumn } from "@/components/ui/DataTable";
 import { Dialog } from "@/components/ui/Dialog";
-import { Drawer } from "@/components/ui/Drawer";
 import { Dropzone } from "@/components/ui/Dropzone";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { SelectInput } from "@/components/ui/Field";
-import {
-  GradedOverlayLegend,
-  GradedSheetOverlay,
-} from "@/components/ui/GradedSheetOverlay";
-import { CloudUploadIcon } from "@/components/ui/Icons";
+import { DocumentIcon } from "@/components/ui/Icons";
 import { useToast } from "@/components/ui/Toast";
-import { ApiError, base64JpegToBlob, gradeSheet } from "@/lib/api";
-import { shortId } from "@/lib/format";
+import { getErrorMessage } from "@/lib/api";
 import { formatPointsValue } from "@/lib/scoring";
 import {
-  addFailedPaper,
-  addPaper,
   computePaperPoints,
   deletePaper,
-  exportBatchCsv,
-  getAvailableKeyVersions,
-  getPaperImageUrl,
-  getPaperSnapshot,
-  replacePaperResult,
-  resolveQuizKeyForVersion,
-  restorePaperSnapshot,
-  saveBatch,
-  submitReview,
-  type Batch,
-  type KeyVersionId,
+  gradeQuizPaper,
+  notifyWorkspaceChanged,
   type Paper,
   type Quiz,
 } from "@/lib/workspace";
 
 interface UploadProgressRow {
   localId: string;
+  file: File;
   paperId?: string;
-  fileName: string;
   phase: "grading" | "done" | "failed";
   progressPct: number;
   statusText: string;
@@ -51,31 +35,44 @@ interface UploadProgressRow {
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
+function getPaperDisplayName(paper: Pick<Paper, "nameText">): string {
+  return paper.nameText || "Unnamed paper";
+}
+
+function formatPaperSubline(
+  paper: Pick<Paper, "studentIdText" | "keyVersion">,
+): string {
+  return [
+    paper.studentIdText ? `ID ${paper.studentIdText}` : "Unlinked",
+    `key ${paper.keyVersion ?? "A"}`,
+  ].join(", ");
+}
+
 export interface PapersTabProps {
   quiz: Quiz;
-  activeBatch: Batch | null;
-  sectionFilterId: string;
   papers: Paper[];
-  dropzoneRef: React.RefObject<HTMLDivElement | null>;
-  onBatchCreated: (batchId: string) => void;
-  onReload: (preferredBatchId?: string | null) => Promise<void>;
+  keyUnset?: boolean;
+  onGoToAnswerKey?: () => void;
+  onReload: () => Promise<void>;
 }
 
 export function PapersTab({
   quiz,
-  activeBatch,
-  sectionFilterId,
   papers,
-  dropzoneRef,
-  onBatchCreated,
+  keyUnset = false,
+  onGoToAnswerKey,
   onReload,
 }: PapersTabProps) {
+  const router = useRouter();
   const { push: pushToast } = useToast();
   const [uploads, setUploads] = useState<UploadProgressRow[]>([]);
   const [uploading, setUploading] = useState(false);
 
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const regradeInputRef = useRef<HTMLInputElement | null>(null);
   const [regradeTarget, setRegradeTarget] = useState<Paper | null>(null);
+  const [regradeConfirmTarget, setRegradeConfirmTarget] =
+    useState<Paper | null>(null);
   const [regradingId, setRegradingId] = useState<string | null>(null);
 
   const [deletePaperTarget, setDeletePaperTarget] = useState<Paper | null>(
@@ -83,69 +80,82 @@ export function PapersTab({
   );
   const [deletingPaper, setDeletingPaper] = useState(false);
 
-  const [viewScan, setViewScan] = useState<Paper | null>(null);
-  const [viewImageUrl, setViewImageUrl] = useState<string | null>(null);
-  const [viewOverlayMode, setViewOverlayMode] = useState<"graded" | "clean">(
-    "graded",
-  );
-  const [updatingVersionId, setUpdatingVersionId] = useState<string | null>(
-    null,
-  );
-
-  const availableKeyVersions = useMemo(
-    () => getAvailableKeyVersions(quiz),
-    [quiz],
-  );
-  const viewScanId = viewScan?.id ?? null;
+  const [inspectedPaperId, setInspectedPaperId] = useState<string | null>(null);
+  const [imageCacheKey, setImageCacheKey] = useState(0);
 
   useEffect(() => {
-    let cancelled = false;
-    let currentUrl: string | null = null;
-    if (!viewScanId) {
-      queueMicrotask(() => {
-        if (!cancelled) setViewImageUrl(null);
-      });
-      return;
-    }
-    getPaperImageUrl(viewScanId)
-      .then((url) => {
-        if (cancelled) {
-          if (url) URL.revokeObjectURL(url);
-          return;
+    queueMicrotask(() => {
+      try {
+        const paperParam = new URLSearchParams(window.location.search).get(
+          "paper_id",
+        );
+        if (paperParam && papers.some((p) => p.id === paperParam)) {
+          setInspectedPaperId(paperParam);
         }
-        currentUrl = url;
-        setViewImageUrl(url);
-      })
-      .catch(() => {
-        if (!cancelled) setViewImageUrl(null);
-      });
-    return () => {
-      cancelled = true;
-      if (currentUrl) URL.revokeObjectURL(currentUrl);
-    };
-  }, [viewScanId]);
+      } catch {
+      }
+    });
+  }, [papers]);
+
+  const sortedPapers = useMemo(
+    () =>
+      [...papers].sort(
+        (a, b) => Number(Boolean(b.needsReview)) - Number(Boolean(a.needsReview)),
+      ),
+    [papers],
+  );
+
+  const paperById = useMemo(
+    () => new Map(papers.map((p) => [p.id, p])),
+    [papers],
+  );
+
+  const pointsByPaperId = useMemo(
+    () => new Map(papers.map((p) => [p.id, computePaperPoints(quiz, p)])),
+    [quiz, papers],
+  );
+
+  async function gradeOneUploadRow(
+    localId: string,
+    file: File,
+    notify = true,
+  ): Promise<boolean> {
+    try {
+      const saved = await gradeQuizPaper(quiz.id, file, undefined, { notify });
+      setUploads((prev) =>
+        prev.map((r) =>
+          r.localId === localId
+            ? {
+                ...r,
+                paperId: saved.id,
+                phase: "done",
+                progressPct: 100,
+                statusText: "Done",
+              }
+            : r,
+        ),
+      );
+      return true;
+    } catch (err) {
+      const message = getErrorMessage(err, "Grading failed.");
+      setUploads((prev) =>
+        prev.map((r) =>
+          r.localId === localId
+            ? {
+                ...r,
+                phase: "failed",
+                progressPct: 100,
+                statusText: message,
+              }
+            : r,
+        ),
+      );
+      return false;
+    }
+  }
 
   async function handleFilesSelected(files: File[]) {
-    if (uploading) return;
-    let targetBatchId = activeBatch?.id ?? null;
-
-    if (targetBatchId === null) {
-      try {
-        const created = await saveBatch({
-          quizId: quiz.id,
-          sectionId: sectionFilterId || null,
-        });
-        targetBatchId = created.id;
-        onBatchCreated(created.id);
-      } catch (err) {
-        pushToast(
-          err instanceof Error ? err.message : "Could not create batch.",
-          "error",
-        );
-        return;
-      }
-    }
-
+    if (uploading || keyUnset) return;
     const validFiles: File[] = [];
     for (const file of files) {
       if (file.size > MAX_FILE_BYTES) {
@@ -158,76 +168,68 @@ export function PapersTab({
 
     const initialRows: UploadProgressRow[] = validFiles.map((file, idx) => ({
       localId: `${Date.now()}-${idx}-${file.name}`,
-      fileName: file.name,
+      file,
       phase: "grading",
       progressPct: 45,
-      statusText: "Grading…",
+      statusText: "Grading...",
     }));
     setUploads((prev) => [...initialRows, ...prev]);
     setUploading(true);
 
-    for (let i = 0; i < validFiles.length; i += 1) {
-      const file = validFiles[i];
-      const localId = initialRows[i].localId;
-      const paperId = crypto.randomUUID();
-      try {
-        const graded = await gradeSheet({
-          file,
-          templateId: quiz.templateId,
-          answerKey: quiz.answerKey,
-          points: quiz.points,
-          questionRules: quiz.questionRules,
-          keyVersions: quiz.keyVersions,
-          saveToWorkspace: true,
-          quizId: quiz.id,
-          quizName: quiz.name,
-          paperId,
-        });
-        const blob = base64JpegToBlob(graded.aligned_image_jpeg_base64);
-        const savedPaper = await addPaper(targetBatchId, graded, blob, {
-          id: paperId,
-        });
-        setUploads((prev) =>
-          prev.map((r) =>
-            r.localId === localId
-              ? {
-                  ...r,
-                  paperId: savedPaper.id,
-                  phase: "done",
-                  progressPct: 100,
-                  statusText: "Done",
-                }
-              : r,
-          ),
-        );
-      } catch (err) {
-        const message =
-          err instanceof ApiError
-            ? err.detail
-            : err instanceof Error
-              ? err.message
-              : "Grading failed.";
-        const failedPaper = await addFailedPaper(targetBatchId, message).catch(
-          () => null,
-        );
-        setUploads((prev) =>
-          prev.map((r) =>
-            r.localId === localId
-              ? {
-                  ...r,
-                  paperId: failedPaper?.id,
-                  phase: "failed",
-                  progressPct: 100,
-                  statusText: message,
-                }
-              : r,
-          ),
-        );
-      }
-    }
+    let anySucceeded = false;
+    let nextIdx = 0;
+    const workerCount = Math.min(2, validFiles.length);
+    await Promise.all(
+      Array.from({ length: workerCount }, async () => {
+        while (nextIdx < validFiles.length) {
+          const i = nextIdx;
+          nextIdx += 1;
+          if (
+            await gradeOneUploadRow(initialRows[i].localId, validFiles[i], false)
+          ) {
+            anySucceeded = true;
+          }
+        }
+      }),
+    );
 
     setUploading(false);
-    await onReload(targetBatchId);
+    setImageCacheKey((k) => k + 1);
+    if (anySucceeded) {
+      notifyWorkspaceChanged();
+    }
+    await onReload();
+  }
+
+  async function handleRetryUpload(row: UploadProgressRow) {
+    if (uploading) return;
+    setUploading(true);
+    setUploads((prev) =>
+      prev.map((r) =>
+        r.localId === row.localId
+          ? {
+              ...r,
+              phase: "grading",
+              progressPct: 45,
+              statusText: "Retrying...",
+            }
+          : r,
+      ),
+    );
+    await gradeOneUploadRow(row.localId, row.file);
+    setUploading(false);
+    setImageCacheKey((k) => k + 1);
+    await onReload();
+  }
+
+  function requestRescan(paper: Paper) {
+    if (regradingId !== null) return;
+    if (Object.keys(paper.corrections).length > 0) {
+      setRegradeConfirmTarget(paper);
+      return;
+    }
+    setRegradeTarget(paper);
+    regradeInputRef.current?.click();
   }
 
   async function handleRegradeFileChange(
@@ -241,31 +243,12 @@ export function PapersTab({
 
     setRegradingId(target.id);
     try {
-      const graded = await gradeSheet({
-        file,
-        templateId: quiz.templateId,
-        answerKey: quiz.answerKey,
-        points: quiz.points,
-        questionRules: quiz.questionRules,
-        keyVersions: quiz.keyVersions,
-        saveToWorkspace: true,
-        quizId: quiz.id,
-        quizName: quiz.name,
-        paperId: target.id,
-      });
-      const blob = base64JpegToBlob(graded.aligned_image_jpeg_base64);
-      await replacePaperResult(target.id, graded, blob);
-      await onReload(activeBatch?.id ?? null);
-      pushToast(`Graded paper #${shortId(target.id)}.`, "success");
+      await gradeQuizPaper(quiz.id, file, target.id);
+      setImageCacheKey((k) => k + 1);
+      await onReload();
+      pushToast(`Re-scanned ${getPaperDisplayName(target)}.`, "success");
     } catch (err) {
-      pushToast(
-        err instanceof ApiError
-          ? err.detail
-          : err instanceof Error
-            ? err.message
-            : "Could not grade scan.",
-        "error",
-      );
+      pushToast(getErrorMessage(err, "Could not grade scan."), "error");
     } finally {
       setRegradingId(null);
     }
@@ -276,169 +259,56 @@ export function PapersTab({
     setDeletingPaper(true);
     try {
       const target = deletePaperTarget;
-      const snapshot = await getPaperSnapshot(target.id);
-      await deletePaper(target.id);
+      await deletePaper(quiz.id, target.id);
       setDeletePaperTarget(null);
-      await onReload(activeBatch?.id ?? null);
-      const label = target.nameText || `Scan #${shortId(target.id)}`;
-      pushToast(
-        `Deleted paper for ${label}.`,
-        "info",
-        snapshot
-          ? {
-              actionLabel: "Undo",
-              onAction: async () => {
-                try {
-                  await restorePaperSnapshot(snapshot);
-                  await onReload(activeBatch?.id ?? null);
-                  pushToast(`Restored paper for ${label}.`, "success");
-                } catch (err) {
-                  pushToast(
-                    err instanceof Error
-                      ? err.message
-                      : "Could not restore paper.",
-                    "error",
-                  );
-                }
-              },
-            }
-          : undefined,
-      );
+      if (inspectedPaperId === target.id) setInspectedPaperId(null);
+      await onReload();
+      pushToast(`Deleted paper for ${getPaperDisplayName(target)}.`, "success");
     } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Could not delete paper.",
-        "error",
-      );
+      pushToast(getErrorMessage(err, "Could not delete paper."), "error");
     } finally {
       setDeletingPaper(false);
     }
   }
 
-  async function handleExportBatchCsv() {
-    if (!activeBatch) return;
-    try {
-      const blob = await exportBatchCsv(activeBatch.id);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${quiz.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "quiz"}-batch-${shortId(activeBatch.id)}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Could not export CSV.",
-        "error",
-      );
+  function handleSelectPaperRow(paper: Paper) {
+    if (paper.needsReview) {
+      router.push(`/review?quiz_id=${quiz.id}&paper_id=${paper.id}`);
+    } else {
+      setInspectedPaperId(paper.id);
     }
   }
-
-  const paperById = useMemo(
-    () => new Map(papers.map((p) => [p.id, p])),
-    [papers],
-  );
-
-  async function handleChangeViewKeyVersion(
-    paperId: string,
-    nextVersion: KeyVersionId,
-  ) {
-    if (updatingVersionId !== null) return;
-    setUpdatingVersionId(paperId);
-    try {
-      await submitReview(paperId, { keyVersion: nextVersion });
-      await onReload(activeBatch?.id ?? null);
-      pushToast("Key version updated and paper rescored.", "success");
-    } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Could not update key version.",
-        "error",
-      );
-    } finally {
-      setUpdatingVersionId(null);
-    }
-  }
-
-  const showKeyColumn =
-    availableKeyVersions.length > 1 ||
-    papers.some((p) => p.keyVersion !== undefined);
 
   const columns: DataTableColumn<Paper>[] = [
     {
       key: "student",
       header: "Student",
-      render: (row) =>
-        row.nameText ? (
-          <span className="font-medium text-[var(--text-primary)]">
-            {row.nameText}
-          </span>
-        ) : (
-          <span className="text-[var(--text-muted)]">Unnamed</span>
-        ),
+      render: (row) => (
+        <div>
+          <div className="font-semibold text-[var(--text-primary)]">
+            {getPaperDisplayName(row)}
+          </div>
+          <div className="text-xs text-[var(--text-secondary)] tabular-nums">
+            {formatPaperSubline(row)}
+          </div>
+        </div>
+      ),
     },
-    {
-      key: "studentId",
-      header: "Student ID",
-      render: (row) =>
-        row.studentIdText ? (
-          <span className="font-mono text-[12px] text-[var(--text-secondary)] tabular-nums">
-            {row.studentIdText}
-          </span>
-        ) : (
-          <span className="text-[var(--text-muted)]">—</span>
-        ),
-    },
-    ...(showKeyColumn
-      ? [
-          {
-            key: "keyVersion",
-            header: "Key",
-            render: (row: Paper) => {
-              const kv = row.keyVersion ?? "A";
-              const mismatch =
-                row.detectedKeyVersion && row.detectedKeyVersion !== kv;
-              return (
-                <span
-                  title={
-                    mismatch
-                      ? `Detected Key ${row.detectedKeyVersion} bubble; scored with Key ${kv}`
-                      : undefined
-                  }
-                  className="inline-flex items-center gap-1 rounded bg-[var(--bg-subtle)] px-1.5 py-0.5 font-mono text-[12px] font-medium text-[var(--text-primary)]"
-                >
-                  {kv}
-                </span>
-              );
-            },
-          } satisfies DataTableColumn<Paper>,
-        ]
-      : []),
     {
       key: "score",
       header: "Score",
       align: "right",
       render: (row) => {
-        if (row.status !== "done") {
-          return <span className="text-[var(--text-muted)]">—</span>;
-        }
-        const pts = computePaperPoints(quiz, row);
+        const pts = pointsByPaperId.get(row.id) ?? computePaperPoints(quiz, row);
         return (
-          <span className="inline-flex flex-wrap items-center justify-end gap-1.5 font-mono tabular-nums">
-            <span className="font-medium text-[var(--text-primary)]">
+          <span className="inline-flex flex-wrap items-baseline justify-end gap-1.5 tabular-nums">
+            <span className="font-bold text-[var(--text-primary)]">
               {formatPointsValue(pts.earnedPoints)} /{" "}
               {formatPointsValue(pts.totalPoints)} pts
             </span>
-            <span className="text-[12px] text-[var(--text-secondary)]">
+            <span className="text-[0.8125rem] text-[var(--text-secondary)]">
               ({row.score.toFixed(1)}%)
             </span>
-            {row.needsReview && (
-              <span
-                title="Provisional score until all flagged questions are resolved"
-                className="rounded bg-[var(--warning-bg)] px-1.5 py-0.5 font-sans text-[11px] font-medium text-[var(--warning-text)]"
-              >
-                Provisional
-              </span>
-            )}
           </span>
         );
       },
@@ -446,25 +316,93 @@ export function PapersTab({
     {
       key: "status",
       header: "Status",
-      render: (row) => {
-        if (row.status === "failed") {
-          return (
-            <span title={row.error || undefined}>
-              <Badge variant="neutral">Failed</Badge>
-            </span>
-          );
-        }
-        return row.needsReview ? (
-          <Badge variant="warning">Needs review</Badge>
+      render: (row) =>
+        row.needsReview ? (
+          <span className="text-[0.8125rem] font-medium text-[var(--warning-text)]">
+            Needs review
+          </span>
         ) : (
-          <Badge variant="success">Graded</Badge>
-        );
-      },
+          <span className="text-[0.8125rem] font-medium text-[var(--success-text)]">
+            Confirmed
+          </span>
+        ),
     },
   ];
 
+  function renderPaperActions(row: Paper) {
+    return (
+      <>
+        {row.needsReview && (
+          <Link
+            href={`/review?quiz_id=${quiz.id}&paper_id=${row.id}`}
+            className="inline-flex min-h-9 items-center justify-center rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-surface)] px-3.5 py-2 text-[0.8125rem] font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-subtle)] [@media(pointer:coarse)]:min-h-12"
+          >
+            Review
+          </Link>
+        )}
+        <ActionMenu
+          label={`Actions for ${row.nameText || "paper"}`}
+          items={[
+            row.needsReview
+              ? {
+                  id: "review",
+                  label: "Review flagged",
+                  href: `/review?quiz_id=${quiz.id}&paper_id=${row.id}`,
+                }
+              : {
+                  id: "view",
+                  label: "View scan",
+                  onClick: () => setInspectedPaperId(row.id),
+                },
+            {
+              id: "rescan",
+              label: "Re-scan sheet",
+              onClick: () => requestRescan(row),
+            },
+            { kind: "divider", id: "div-1" },
+            {
+              id: "delete",
+              label: "Delete paper",
+              variant: "danger",
+              onClick: () => setDeletePaperTarget(row),
+            },
+          ]}
+        />
+      </>
+    );
+  }
+
+  const inspectedPaper = inspectedPaperId
+    ? (paperById.get(inspectedPaperId) ?? null)
+    : null;
+
   return (
-    <div className="space-y-4">
+    <div
+      className="space-y-4"
+      onDragOver={(e) => {
+        if (!keyUnset && papers.length > 0) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        if (!keyUnset && papers.length > 0 && e.dataTransfer.files?.length) {
+          e.preventDefault();
+          void handleFilesSelected(Array.from(e.dataTransfer.files));
+        }
+      }}
+    >
+      <input
+        id="papers-upload-input"
+        ref={uploadInputRef}
+        type="file"
+        accept="image/png,image/jpeg"
+        multiple
+        disabled={uploading}
+        onChange={(e) => {
+          const files = e.target.files ? Array.from(e.target.files) : [];
+          if (uploadInputRef.current) uploadInputRef.current.value = "";
+          if (files.length > 0) void handleFilesSelected(files);
+        }}
+        className="sr-only"
+      />
       <input
         ref={regradeInputRef}
         type="file"
@@ -473,186 +411,191 @@ export function PapersTab({
         className="sr-only"
       />
 
-      <div ref={dropzoneRef} className="space-y-3">
-        <Dropzone
-          accept="image/png,image/jpeg"
-          multiple
-          disabled={uploading}
-          disabledReason={
-            uploading ? "Wait for current uploads to finish" : undefined
-          }
-          label="Drop papers here or browse"
-          hint="PNG or JPEG, up to 10 MB each"
-          onFiles={(files) => void handleFilesSelected(files)}
-        />
-
-        {uploads.length > 0 && (
-          <Card
-            padded={false}
-            className="divide-y divide-[var(--border-hairline)]"
-          >
-            {uploads.map((row) => {
-              const savedPaper = row.paperId
-                ? paperById.get(row.paperId)
-                : undefined;
-              const effectivePhase =
-                savedPaper && row.phase !== "grading"
-                  ? savedPaper.status
-                  : row.phase;
-              const effectiveStatusText =
-                savedPaper && row.phase !== "grading"
-                  ? savedPaper.status === "done"
-                    ? "Done"
-                    : savedPaper.error || "Failed"
-                  : row.statusText;
-              const effectivePct =
-                effectivePhase === "done" || effectivePhase === "failed"
-                  ? 100
-                  : row.progressPct;
-              return (
-                <div
-                  key={row.localId}
-                  className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2 text-[12px]">
-                      <span className="truncate font-medium text-[var(--text-primary)]">
-                        {row.fileName}
-                      </span>
-                      <span
-                        className={
-                          effectivePhase === "failed"
-                            ? "text-[var(--danger)]"
-                            : effectivePhase === "done"
-                              ? "text-[var(--success)]"
-                              : "text-[var(--text-secondary)]"
-                        }
-                      >
-                        {effectiveStatusText}
-                      </span>
-                    </div>
-                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-subtle)]">
-                      <div
-                        className={`h-full transition-all duration-300 ${
-                          effectivePhase === "failed"
-                            ? "bg-[var(--danger)]"
-                            : "bg-[var(--brand)]"
-                        }`}
-                        style={{ width: `${effectivePct}%` }}
-                      />
-                    </div>
+      {uploads.length > 0 && (
+        <Card
+          padded={false}
+          className="divide-y divide-[var(--border-hairline)]"
+        >
+          {uploads.map((row) => {
+            const savedPaper = row.paperId
+              ? paperById.get(row.paperId)
+              : undefined;
+            const effectivePhase =
+              savedPaper && row.phase !== "grading" ? "done" : row.phase;
+            const effectiveStatusText =
+              savedPaper && row.phase !== "grading" ? "Done" : row.statusText;
+            const effectivePct =
+              effectivePhase === "done" || effectivePhase === "failed"
+                ? 100
+                : row.progressPct;
+            return (
+              <div
+                key={row.localId}
+                className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate font-medium text-[var(--text-primary)]">
+                      {row.file.name}
+                    </span>
+                    <span
+                      className={
+                        effectivePhase === "failed"
+                          ? "text-[var(--danger)]"
+                          : effectivePhase === "done"
+                            ? "text-[var(--success)]"
+                            : "text-[var(--text-secondary)]"
+                      }
+                    >
+                      {effectiveStatusText}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-subtle)]">
+                    <div
+                      className={`h-full transition-all duration-300 ${
+                        effectivePhase === "failed"
+                          ? "bg-[var(--danger)]"
+                          : "bg-[var(--brand)]"
+                      }`}
+                      style={{ width: `${effectivePct}%` }}
+                    />
                   </div>
                 </div>
-              );
-            })}
-          </Card>
-        )}
-      </div>
+                {effectivePhase === "failed" && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={uploading}
+                    onClick={() => void handleRetryUpload(row)}
+                  >
+                    Retry
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </Card>
+      )}
 
       {papers.length === 0 ? (
-        <EmptyState
-          icon={<CloudUploadIcon />}
-          title="No papers graded in this batch"
-          description="Drop scanned PNG or JPEG answer sheets above to start grading."
-        />
-      ) : (
-        <div className="space-y-3">
-          <DataTable
-            rows={papers}
-            columns={columns}
-            rowKey={(row) => row.id}
-            renderActions={(row) => {
-              if (row.status === "failed") {
-                return (
-                  <>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      disabled={regradingId === row.id}
-                      onClick={() => {
-                        setRegradeTarget(row);
-                        regradeInputRef.current?.click();
-                      }}
-                    >
-                      {regradingId === row.id ? "Grading…" : "Grade now"}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setDeletePaperTarget(row)}
-                      className="text-[var(--danger)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
-                    >
-                      Delete
-                    </Button>
-                  </>
-                );
-              }
-              if (row.needsReview) {
-                return (
-                  <>
-                    <Link
-                      href={`/review?paper_id=${row.id}`}
-                      className="text-[12px] font-medium text-[var(--brand-text)] hover:underline"
-                    >
-                      Review →
-                    </Link>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setDeletePaperTarget(row)}
-                      className="text-[var(--danger)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
-                    >
-                      Delete
-                    </Button>
-                  </>
-                );
-              }
-              return (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setViewScan(row)}
-                  >
-                    View
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setDeletePaperTarget(row)}
-                    className="text-[var(--danger)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
-                  >
-                    Delete
-                  </Button>
-                </>
-              );
-            }}
+        keyUnset ? (
+          <EmptyState
+            icon={<DocumentIcon />}
+            title="Set the answer key first"
+            description="Papers cannot be graded until this quiz has a saved answer key."
+            action={
+              onGoToAnswerKey ? (
+                <Button variant="primary" onClick={onGoToAnswerKey}>
+                  Open answer key
+                </Button>
+              ) : undefined
+            }
           />
+        ) : (
+          <Dropzone
+            accept="image/png,image/jpeg"
+            multiple
+            disabled={uploading}
+            disabledReason={
+              uploading ? "Wait for current uploads to finish" : undefined
+            }
+            label="Drop PNG or JPEG papers here to grade"
+            hint="Or select Upload papers above, up to 10 MB each"
+            onFiles={(files) => void handleFilesSelected(files)}
+          />
+        )
+      ) : (
+        <>
+          <ul className="divide-y divide-[var(--border-hairline)] rounded-xl border border-[var(--border-hairline)] bg-[var(--bg-surface)] sm:hidden">
+            {sortedPapers.map((row) => {
+              const pts =
+                pointsByPaperId.get(row.id) ?? computePaperPoints(quiz, row);
+              return (
+                <li
+                  key={row.id}
+                  onClick={(e) => {
+                    const target = e.target as HTMLElement | null;
+                    if (
+                      target?.closest(
+                        'button, a, input, select, [data-stop-row="true"]',
+                      )
+                    ) {
+                      return;
+                    }
+                    handleSelectPaperRow(row);
+                  }}
+                  className="cursor-pointer space-y-2.5 px-4 py-3.5 transition-colors hover:bg-black/[0.02]"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold text-[var(--text-primary)]">
+                        {getPaperDisplayName(row)}
+                      </div>
+                      <div className="text-xs text-[var(--text-secondary)] tabular-nums">
+                        {formatPaperSubline(row)}
+                      </div>
+                    </div>
+                    {row.needsReview ? (
+                      <span className="shrink-0 text-[0.8125rem] font-medium text-[var(--warning-text)]">
+                        Needs review
+                      </span>
+                    ) : (
+                      <span className="shrink-0 text-[0.8125rem] font-medium text-[var(--success-text)]">
+                        Confirmed
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm tabular-nums">
+                      <span className="font-bold text-[var(--text-primary)]">
+                        {formatPointsValue(pts.earnedPoints)} /{" "}
+                        {formatPointsValue(pts.totalPoints)} pts
+                      </span>{" "}
+                      <span className="text-[0.8125rem] text-[var(--text-secondary)]">
+                        ({row.score.toFixed(1)}%)
+                      </span>
+                    </span>
+                    <div
+                      data-stop-row="true"
+                      className="inline-flex shrink-0 items-center justify-end gap-2"
+                    >
+                      {renderPaperActions(row)}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
 
-          <div className="flex justify-end">
-            <Button
-              variant="secondary"
-              disabled={!activeBatch || papers.length === 0}
-              disabledReason={
-                !activeBatch || papers.length === 0
-                  ? "Grade at least one paper to export CSV"
-                  : undefined
+          <div className="hidden sm:block">
+            <DataTable
+              rows={sortedPapers}
+              columns={columns}
+              rowKey={(row) => row.id}
+              tableClassName="table-fixed min-w-[680px]"
+              actionsHeaderSrOnly
+              colgroup={
+                <colgroup>
+                  <col />
+                  <col style={{ width: "170px" }} />
+                  <col style={{ width: "130px" }} />
+                  <col style={{ width: "176px" }} />
+                </colgroup>
               }
-              onClick={() => void handleExportBatchCsv()}
-            >
-              Export CSV
-            </Button>
+              onRowClick={handleSelectPaperRow}
+              renderActions={renderPaperActions}
+            />
           </div>
-        </div>
+        </>
       )}
 
       <Dialog
         open={deletePaperTarget !== null}
-        title={`Delete paper for "${deletePaperTarget?.nameText || "Unnamed"}"?`}
+        title="Delete graded paper?"
         description={
           deletePaperTarget
-            ? `This permanently removes Scan #${shortId(deletePaperTarget.id)} (student: ${deletePaperTarget.nameText || "Unnamed"}${deletePaperTarget.studentIdText ? `, ID: ${deletePaperTarget.studentIdText}` : ""}, score: ${deletePaperTarget.score.toFixed(1)}%) and its aligned scan image. You can undo immediately after deletion.`
-            : "This permanently removes the aligned scan image and its graded score."
+            ? `This permanently deletes ${getPaperDisplayName(deletePaperTarget)} and its scan images from this folder.`
+            : "This permanently deletes the paper and its scan images from this folder."
         }
         confirmLabel="Delete paper"
         confirmVariant="danger"
@@ -661,135 +604,41 @@ export function PapersTab({
         onClose={() => setDeletePaperTarget(null)}
       />
 
-      {(() => {
-        const currentViewScan = viewScan
-          ? (paperById.get(viewScan.id) ?? viewScan)
-          : null;
-        const resolvedViewKey = currentViewScan
-          ? resolveQuizKeyForVersion(quiz, currentViewScan.keyVersion)
-          : null;
+      <PaperInspectionDrawer
+        key={inspectedPaper?.id ?? "closed"}
+        quiz={quiz}
+        paper={inspectedPaper}
+        points={
+          inspectedPaper ? pointsByPaperId.get(inspectedPaper.id) : undefined
+        }
+        imageCacheKey={imageCacheKey}
+        regradingId={regradingId}
+        guardClosing={regradeConfirmTarget !== null}
+        onRequestRescan={requestRescan}
+        onReload={onReload}
+        onClose={() => setInspectedPaperId(null)}
+      />
 
-        return (
-          <Drawer
-            open={currentViewScan !== null}
-            title={currentViewScan?.nameText || "Unnamed"}
-            subtitle={
-              currentViewScan
-                ? (() => {
-                    const pts = computePaperPoints(quiz, currentViewScan);
-                    return `Score: ${formatPointsValue(pts.earnedPoints)} / ${formatPointsValue(pts.totalPoints)} pts (${currentViewScan.score.toFixed(1)}%)${currentViewScan.needsReview ? " · Provisional" : ""} · Scan #${shortId(currentViewScan.id)}`;
-                  })()
-                : undefined
-            }
-            onClose={() => setViewScan(null)}
-          >
-            {currentViewScan && resolvedViewKey && (
-              <div className="space-y-3">
-                {currentViewScan.answers.length === quiz.answerKey.length && (
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div
-                        role="group"
-                        aria-label="Paper image layer"
-                        className="inline-flex rounded-[8px] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-0.5 text-[12px] font-medium"
-                      >
-                        <button
-                          type="button"
-                          aria-pressed={viewOverlayMode === "graded"}
-                          onClick={() => setViewOverlayMode("graded")}
-                          className={`rounded-[6px] px-2.5 py-1 transition-colors ${
-                            viewOverlayMode === "graded"
-                              ? "bg-[var(--brand)] text-white"
-                              : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                          }`}
-                        >
-                          Graded overlay
-                        </button>
-                        <button
-                          type="button"
-                          aria-pressed={viewOverlayMode === "clean"}
-                          onClick={() => setViewOverlayMode("clean")}
-                          className={`rounded-[6px] px-2.5 py-1 transition-colors ${
-                            viewOverlayMode === "clean"
-                              ? "bg-[var(--brand)] text-white"
-                              : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                          }`}
-                        >
-                          Clean scan
-                        </button>
-                      </div>
-
-                      {availableKeyVersions.length > 1 && (
-                        <div className="flex items-center gap-1.5">
-                          <label
-                            htmlFor="drawer-key-version"
-                            className="text-[12px] font-medium text-[var(--text-secondary)]"
-                          >
-                            Key
-                          </label>
-                          <SelectInput
-                            id="drawer-key-version"
-                            selectSize="sm"
-                            value={currentViewScan.keyVersion ?? "A"}
-                            disabled={updatingVersionId === currentViewScan.id}
-                            onChange={(e) =>
-                              void handleChangeViewKeyVersion(
-                                currentViewScan.id,
-                                e.target.value as KeyVersionId,
-                              )
-                            }
-                            className="!w-auto"
-                          >
-                            {availableKeyVersions.map((ver) => (
-                              <option key={ver} value={ver}>
-                                Key {ver}
-                              </option>
-                            ))}
-                          </SelectInput>
-                        </div>
-                      )}
-                    </div>
-                    {viewOverlayMode === "graded" && <GradedOverlayLegend />}
-                  </div>
-                )}
-
-                {viewImageUrl ? (
-                  <div className="flex justify-center overflow-hidden rounded-[8px] border border-[var(--border-hairline)] bg-[var(--bg-subtle)] p-2">
-                    <div className="relative inline-block">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={viewImageUrl}
-                        alt={`Scan ${shortId(currentViewScan.id)}`}
-                        className="block max-h-[560px] w-auto max-w-full"
-                      />
-                      {viewOverlayMode === "graded" &&
-                        currentViewScan.answers.length ===
-                          quiz.answerKey.length && (
-                          <GradedSheetOverlay
-                            answerKey={resolvedViewKey.answerKey}
-                            points={resolvedViewKey.points}
-                            questionRules={resolvedViewKey.questionRules}
-                            keyVersion={
-                              currentViewScan.keyVersion ??
-                              resolvedViewKey.version
-                            }
-                            answers={currentViewScan.answers}
-                            flags={currentViewScan.flags}
-                            corrections={currentViewScan.corrections}
-                          />
-                        )}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-[14px] text-[var(--text-muted)]">
-                    Aligned scan image unavailable.
-                  </p>
-                )}
-              </div>
-            )}
-          </Drawer>
-        );
-      })()}
+      <Dialog
+        open={regradeConfirmTarget !== null}
+        title="Re-scan and clear manual fixes?"
+        description={(() => {
+          const count = regradeConfirmTarget
+            ? Object.keys(regradeConfirmTarget.corrections).length
+            : 0;
+          return `Re-scanning ${regradeConfirmTarget?.nameText || "this paper"} will clear ${count} manual review ${count === 1 ? "correction" : "corrections"}.`;
+        })()}
+        confirmLabel="Choose scan"
+        confirmVariant="danger"
+        onConfirm={() => {
+          const target = regradeConfirmTarget;
+          setRegradeConfirmTarget(null);
+          if (!target) return;
+          setRegradeTarget(target);
+          regradeInputRef.current?.click();
+        }}
+        onClose={() => setRegradeConfirmTarget(null)}
+      />
     </div>
   );
 }

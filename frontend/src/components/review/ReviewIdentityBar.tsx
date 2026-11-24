@@ -2,9 +2,13 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { ActionMenu } from "@/components/ui/ActionMenu";
 import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
 import { FormField, SelectInput, TextInput } from "@/components/ui/Field";
 import { useToast } from "@/components/ui/Toast";
+import { getErrorMessage } from "@/lib/api";
+import { formatHumanDate } from "@/lib/format";
 import {
   submitReview,
   type KeyVersionId,
@@ -14,64 +18,94 @@ import {
 } from "@/lib/workspace";
 
 interface ReviewIdentityBarProps {
-  scan: ReviewQueueItem;
+  paper: ReviewQueueItem;
   students: Student[];
   onUpdated: (updated: Paper) => void;
 }
 
 export function ReviewIdentityBar({
-  scan,
+  paper,
   students,
   onUpdated,
 }: ReviewIdentityBarProps) {
   const { push: pushToast } = useToast();
+  const [editing, setEditing] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState(
-    scan.studentId ?? "",
+    paper.studentId ?? "",
   );
-  const [studentIdText, setStudentIdText] = useState(scan.studentIdText ?? "");
-  const [nameText, setNameText] = useState(scan.nameText ?? "");
-  const [dateText, setDateText] = useState(scan.dateText ?? "");
-  const [sectionText, setSectionText] = useState(scan.sectionText ?? "");
+  const [studentIdText, setStudentIdText] = useState(paper.studentIdText ?? "");
+  const [nameText, setNameText] = useState(paper.nameText ?? "");
+  const [nameTouched, setNameTouched] = useState(false);
+  const [dateText, setDateText] = useState(paper.dateText ?? "");
+  const [classText, setClassText] = useState(paper.classText ?? "");
   const [keyVersion, setKeyVersion] = useState<KeyVersionId>(
-    scan.keyVersion ?? "A",
+    paper.keyVersion ?? "A",
   );
   const [savingIdentity, setSavingIdentity] = useState(false);
+  const [unlinkConfirmOpen, setUnlinkConfirmOpen] = useState(false);
 
-  const availableKeyVersions = scan.availableKeyVersions ?? ["A"];
+  const availableKeyVersions = paper.availableKeyVersions ?? ["A"];
   const hasMultipleKeys = availableKeyVersions.length > 1;
-  const currentKeyVersion: KeyVersionId = scan.keyVersion ?? "A";
-  const currentStudentIdStr = scan.studentId ?? "";
-  const currentStudentIdText = scan.studentIdText ?? "";
+  const currentKeyVersion: KeyVersionId = paper.keyVersion ?? "A";
+  const currentStudentIdStr = paper.studentId ?? "";
+  const currentStudentIdText = paper.studentIdText ?? "";
+  const newlyLinkedStudent =
+    selectedStudentId && selectedStudentId !== currentStudentIdStr
+      ? students.find((s) => s.id === selectedStudentId)
+      : undefined;
+  const presetLinkedName = newlyLinkedStudent
+    ? `${newlyLinkedStudent.lastName}, ${newlyLinkedStudent.firstName}`
+    : null;
+  const presetLinkedCode = newlyLinkedStudent
+    ? newlyLinkedStudent.studentCode
+    : null;
+  const nameEdited =
+    nameText !== paper.nameText &&
+    (presetLinkedName === null || nameText.trim() !== presetLinkedName);
+  const studentIdTextEdited =
+    studentIdText !== currentStudentIdText &&
+    (presetLinkedCode === null || studentIdText.trim() !== presetLinkedCode);
   const anyIdentityTextChanged =
-    nameText !== scan.nameText ||
-    dateText !== scan.dateText ||
-    sectionText !== scan.sectionText ||
-    studentIdText !== currentStudentIdText ||
+    nameEdited ||
+    dateText !== paper.dateText ||
+    classText !== paper.classText ||
+    studentIdTextEdited ||
     selectedStudentId !== currentStudentIdStr;
   const keyVersionChanged =
     hasMultipleKeys &&
-    (keyVersion !== currentKeyVersion || Boolean(scan.keyVersionFlagged));
+    (keyVersion !== currentKeyVersion || Boolean(paper.keyVersionFlagged));
   const identityChanged = anyIdentityTextChanged || keyVersionChanged;
+
+  const nameError = !nameText.trim() ? "Student name cannot be empty" : null;
+
+  function syncFormFromPaper() {
+    setSelectedStudentId(paper.studentId ?? "");
+    setStudentIdText(paper.studentIdText ?? "");
+    setNameText(paper.nameText ?? "");
+    setDateText(paper.dateText ?? "");
+    setClassText(paper.classText ?? "");
+    setKeyVersion(paper.keyVersion ?? "A");
+    setNameTouched(false);
+  }
 
   async function handleSaveIdentity(event: React.FormEvent) {
     event.preventDefault();
+    setNameTouched(true);
     if (!identityChanged || savingIdentity) return;
+    if (nameEdited && nameError) return;
 
     setSavingIdentity(true);
     try {
-      const updated = await submitReview(scan.id, {
+      const updated = await submitReview(paper.quizId, paper.id, {
         ...(keyVersionChanged ? { keyVersion } : {}),
         ...(anyIdentityTextChanged
           ? {
               identity: {
-                nameText: nameText !== scan.nameText ? nameText : undefined,
-                dateText: dateText !== scan.dateText ? dateText : undefined,
-                sectionText:
-                  sectionText !== scan.sectionText ? sectionText : undefined,
-                studentIdText:
-                  studentIdText !== currentStudentIdText
-                    ? studentIdText
-                    : undefined,
+                nameText: nameEdited ? nameText.trim() : undefined,
+                dateText: dateText !== paper.dateText ? dateText : undefined,
+                classText:
+                  classText !== paper.classText ? classText : undefined,
+                studentIdText: studentIdTextEdited ? studentIdText : undefined,
                 studentId:
                   selectedStudentId !== currentStudentIdStr
                     ? selectedStudentId || null
@@ -81,21 +115,16 @@ export function ReviewIdentityBar({
           : {}),
       });
       onUpdated(updated);
-      setNameText(updated.nameText);
-      setDateText(updated.dateText);
-      setSectionText(updated.sectionText);
-      setStudentIdText(updated.studentIdText ?? "");
-      setSelectedStudentId(updated.studentId ?? "");
-      setKeyVersion(updated.keyVersion ?? "A");
+      setEditing(false);
+      setNameTouched(false);
       pushToast(
-        keyVersionChanged ? "Identity and key version saved." : "Identity saved.",
+        keyVersionChanged
+          ? "Identity and key version saved."
+          : "Identity saved.",
         "success",
       );
     } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Could not save identity.",
-        "error",
-      );
+      pushToast(getErrorMessage(err, "Could not save identity."), "error");
     } finally {
       setSavingIdentity(false);
     }
@@ -103,199 +132,295 @@ export function ReviewIdentityBar({
 
   async function handleUnlinkStudent() {
     if (!currentStudentIdStr || savingIdentity) return;
-    const scanId = scan.id;
+    const paperId = paper.id;
     const previousStudentId = currentStudentIdStr;
     setSavingIdentity(true);
     try {
-      const updated = await submitReview(scanId, {
+      const updated = await submitReview(paper.quizId, paperId, {
         identity: { studentId: null },
       });
-      onUpdated(updated);
+      setUnlinkConfirmOpen(false);
+      syncFormFromPaper();
       setSelectedStudentId("");
-      pushToast("Student unlinked.", "info", {
+      setEditing(true);
+      onUpdated(updated);
+      pushToast("Unlinked student from paper.", "info", {
         actionLabel: "Undo",
         onAction: async () => {
           try {
-            const relinked = await submitReview(scanId, {
+            const relinked = await submitReview(paper.quizId, paperId, {
               identity: { studentId: previousStudentId },
             });
             onUpdated(relinked);
             pushToast("Restored student link.", "success");
           } catch (err) {
             pushToast(
-              err instanceof Error
-                ? err.message
-                : "Could not restore student link.",
+              getErrorMessage(err, "Could not restore student link."),
               "error",
             );
           }
         },
       });
     } catch (err) {
-      pushToast(
-        err instanceof Error ? err.message : "Could not unlink student.",
-        "error",
-      );
+      pushToast(getErrorMessage(err, "Could not unlink student."), "error");
     } finally {
       setSavingIdentity(false);
     }
   }
 
+  const identityMenuItems = currentStudentIdStr
+    ? [
+        {
+          id: "unlink",
+          label: "Unlink student",
+          variant: "danger" as const,
+          onClick: () => setUnlinkConfirmOpen(true),
+        },
+      ]
+    : [
+        {
+          id: "students",
+          label: "Open students directory",
+          href: "/students",
+        },
+      ];
+
   return (
-    <form
-      onSubmit={(e) => void handleSaveIdentity(e)}
-      className="border-b border-[var(--border-hairline)] bg-[var(--bg-subtle)]/40 px-6 py-3"
-    >
-      <div
-        className={`grid items-end gap-3 sm:grid-cols-2 ${
-          hasMultipleKeys
-            ? "lg:grid-cols-[1.15fr_0.85fr_1.05fr_0.75fr_0.75fr_0.6fr_auto]"
-            : "lg:grid-cols-[1.2fr_0.9fr_1.1fr_0.75fr_0.75fr_auto]"
-        }`}
-      >
-        <FormField
-          id="review-student"
-          label="Student link"
-          size="sm"
-          labelAction={
-            students.length === 0 ? (
-              <Link
-                href="/students"
-                className="text-[11px] font-medium text-[var(--brand-text)] hover:underline"
-              >
-                Add students →
-              </Link>
-            ) : undefined
-          }
-        >
-          <SelectInput
-            id="review-student"
-            selectSize="sm"
-            value={selectedStudentId}
-            disabled={students.length === 0}
-            onChange={(e) => {
-              const val = e.target.value;
-              setSelectedStudentId(val);
-              const stu = students.find((s) => s.id === val);
-              if (stu) {
-                if (!nameText) {
-                  setNameText(`${stu.lastName}, ${stu.firstName}`);
-                }
-                if (!studentIdText) {
-                  setStudentIdText(stu.studentCode);
-                }
-              }
-            }}
-          >
-            <option value="">
-              {students.length === 0 ? "No students yet" : "Unlinked"}
-            </option>
-            {students.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.lastName}, {s.firstName} ({s.studentCode})
-              </option>
-            ))}
-          </SelectInput>
-        </FormField>
-
-        <FormField id="review-student-id-text" label="Student ID" size="sm">
-          <TextInput
-            id="review-student-id-text"
-            type="text"
-            inputSize="sm"
-            placeholder="e.g. 0123456789"
-            value={studentIdText}
-            onChange={(e) => setStudentIdText(e.target.value)}
-            className="font-mono"
-          />
-        </FormField>
-
-        <FormField id="review-name" label="Name" size="sm">
-          <TextInput
-            id="review-name"
-            type="text"
-            inputSize="sm"
-            placeholder="e.g. Dela Cruz, Juan"
-            value={nameText}
-            onChange={(e) => setNameText(e.target.value)}
-          />
-        </FormField>
-
-        <FormField id="review-section" label="Class" size="sm">
-          <TextInput
-            id="review-section"
-            type="text"
-            inputSize="sm"
-            placeholder="e.g. 10-Rizal"
-            value={sectionText}
-            onChange={(e) => setSectionText(e.target.value)}
-          />
-        </FormField>
-
-        <FormField id="review-date" label="Date" size="sm">
-          <TextInput
-            id="review-date"
-            type="text"
-            inputSize="sm"
-            placeholder="2026-11-18"
-            value={dateText}
-            onChange={(e) => setDateText(e.target.value)}
-          />
-        </FormField>
-
-        {hasMultipleKeys && (
-          <FormField
-            id="review-key-version"
-            label="Key"
-            size="sm"
-            labelAction={
-              scan.keyVersionFlagged ? (
-                <span className="text-[10px] font-medium text-[var(--warning-text)]">
-                  Unclear
+    <>
+      {!editing ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-hairline)] bg-[var(--bg-subtle)]/40 px-6 py-2.5">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[0.8125rem]">
+            {!currentStudentIdStr && (
+              <span className="font-medium text-[var(--warning-text)]">
+                Unlinked student
+              </span>
+            )}
+            <span className="tabular-nums">
+              <span className="mr-1.5 text-[0.6875rem] font-medium text-[var(--text-muted)]">
+                ID
+              </span>
+              {paper.studentIdText || "—"}
+            </span>
+            <span>
+              <span className="mr-1.5 text-[0.6875rem] font-medium text-[var(--text-muted)]">
+                Class
+              </span>
+              {paper.classText || "—"}
+            </span>
+            <span className="tabular-nums">
+              <span className="mr-1.5 text-[0.6875rem] font-medium text-[var(--text-muted)]">
+                Date
+              </span>
+              {formatHumanDate(paper.dateText) || "—"}
+            </span>
+            {hasMultipleKeys && (
+              <span>
+                <span className="mr-1.5 text-[0.6875rem] font-medium text-[var(--text-muted)]">
+                  Key
                 </span>
-              ) : undefined
-            }
-          >
-            <SelectInput
-              id="review-key-version"
-              selectSize="sm"
-              value={keyVersion}
-              onChange={(e) => setKeyVersion(e.target.value as KeyVersionId)}
-            >
-              {availableKeyVersions.map((ver) => (
-                <option key={ver} value={ver}>
-                  {ver}
-                </option>
-              ))}
-            </SelectInput>
-          </FormField>
-        )}
-
-        <div className="flex items-center gap-1.5">
-          <Button
-            type="submit"
-            variant="secondary"
-            size="sm"
-            disabled={!identityChanged || savingIdentity}
-            disabledReason={
-              !identityChanged ? "No identity changes to save" : undefined
-            }
-          >
-            {savingIdentity ? "Saving…" : "Save identity"}
-          </Button>
-          {currentStudentIdStr && (
+                {paper.keyVersion ?? "A"}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
             <Button
-              variant="ghost"
+              variant="secondary"
               size="sm"
-              disabled={savingIdentity}
-              onClick={() => void handleUnlinkStudent()}
-              className="text-[var(--danger)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
+              onClick={() => {
+                syncFormFromPaper();
+                setEditing(true);
+              }}
             >
-              Unlink
+              {currentStudentIdStr ? "Edit details" : "Link student"}
             </Button>
-          )}
+            <ActionMenu label="Identity actions" items={identityMenuItems} />
+          </div>
         </div>
-      </div>
-    </form>
+      ) : (
+        <form
+          onSubmit={(e) => void handleSaveIdentity(e)}
+          className="space-y-2.5 border-b border-[var(--border-hairline)] bg-[var(--bg-subtle)]/40 px-6 py-3"
+        >
+          <div
+            className={`grid items-start gap-3 sm:grid-cols-2 ${
+              hasMultipleKeys
+                ? "lg:grid-cols-[1.2fr_0.85fr_1.1fr_0.8fr_0.85fr_0.55fr]"
+                : "lg:grid-cols-[1.25fr_0.9fr_1.1fr_0.8fr_0.85fr]"
+            }`}
+          >
+            <FormField
+              id="review-student"
+              label="Student link"
+              size="sm"
+              labelAction={
+                students.length === 0 ? (
+                  <Link
+                    href="/students"
+                    className="text-[0.6875rem] font-medium text-[var(--brand-text)] underline underline-offset-2"
+                  >
+                    Add students
+                  </Link>
+                ) : undefined
+              }
+            >
+              <SelectInput
+                id="review-student"
+                selectSize="sm"
+                value={selectedStudentId}
+                disabled={students.length === 0}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedStudentId(val);
+                  const stu = students.find((s) => s.id === val);
+                  if (stu) {
+                    setNameText(`${stu.lastName}, ${stu.firstName}`);
+                    setStudentIdText(stu.studentCode);
+                  }
+                }}
+              >
+                <option value="">
+                  {students.length === 0 ? "No students yet" : "Unlinked"}
+                </option>
+                {students.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.lastName}, {s.firstName} ({s.studentCode})
+                  </option>
+                ))}
+              </SelectInput>
+            </FormField>
+
+            <FormField id="review-student-id-text" label="Student ID" size="sm">
+              <TextInput
+                id="review-student-id-text"
+                type="text"
+                inputSize="sm"
+                placeholder="e.g. 0123456789"
+                value={studentIdText}
+                onChange={(e) => setStudentIdText(e.target.value)}
+                className="font-mono tabular-nums"
+              />
+            </FormField>
+
+            <FormField
+              id="review-name"
+              label="Name"
+              size="sm"
+              error={
+                nameTouched && nameText !== paper.nameText ? nameError : null
+              }
+            >
+              <TextInput
+                id="review-name"
+                type="text"
+                inputSize="sm"
+                hasError={Boolean(
+                  nameTouched && nameText !== paper.nameText && nameError,
+                )}
+                placeholder="e.g. Dela Cruz, Juan"
+                value={nameText}
+                onBlur={() => setNameTouched(true)}
+                onChange={(e) => setNameText(e.target.value)}
+              />
+            </FormField>
+
+            <FormField id="review-class" label="Class" size="sm">
+              <TextInput
+                id="review-class"
+                type="text"
+                inputSize="sm"
+                placeholder="e.g. 10-Rizal"
+                value={classText}
+                onChange={(e) => setClassText(e.target.value)}
+              />
+            </FormField>
+
+            <FormField id="review-date" label="Date" size="sm">
+              <TextInput
+                id="review-date"
+                type="date"
+                inputSize="sm"
+                value={dateText}
+                onChange={(e) => setDateText(e.target.value)}
+              />
+            </FormField>
+
+            {hasMultipleKeys && (
+              <FormField
+                id="review-key-version"
+                label="Key"
+                size="sm"
+                labelAction={
+                  paper.keyVersionFlagged ? (
+                    <span className="text-[0.625rem] font-medium text-[var(--warning-text)]">
+                      Unclear
+                    </span>
+                  ) : undefined
+                }
+              >
+                <SelectInput
+                  id="review-key-version"
+                  selectSize="sm"
+                  value={keyVersion}
+                  onChange={(e) =>
+                    setKeyVersion(e.target.value as KeyVersionId)
+                  }
+                >
+                  {availableKeyVersions.map((ver) => (
+                    <option key={ver} value={ver}>
+                      {ver}
+                    </option>
+                  ))}
+                </SelectInput>
+              </FormField>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {identityChanged && (
+                <Button
+                  type="submit"
+                  variant="secondary"
+                  size="sm"
+                  disabled={
+                    savingIdentity ||
+                    Boolean(nameText !== paper.nameText && nameError)
+                  }
+                  disabledReason={
+                    nameText !== paper.nameText && nameError
+                      ? nameError
+                      : undefined
+                  }
+                >
+                  {savingIdentity ? "Saving..." : "Save identity"}
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setEditing(false);
+                  syncFormFromPaper();
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+            <ActionMenu label="Identity actions" items={identityMenuItems} />
+          </div>
+        </form>
+      )}
+
+      <Dialog
+        open={unlinkConfirmOpen}
+        title="Unlink student from paper?"
+        description="The paper remains graded, but it will no longer appear on this student's profile."
+        confirmLabel="Unlink student"
+        confirmVariant="danger"
+        busy={savingIdentity}
+        onConfirm={() => void handleUnlinkStudent()}
+        onClose={() => setUnlinkConfirmOpen(false)}
+      />
+    </>
   );
 }

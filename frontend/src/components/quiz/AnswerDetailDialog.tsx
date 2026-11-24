@@ -46,6 +46,7 @@ export function AnswerDetailDialog({
   const [draftPrimaryPts, setDraftPrimaryPts] = useState(
     String(primaryPoints ?? 1),
   );
+  const [primaryTouched, setPrimaryTouched] = useState(false);
   const [alternates, setAlternates] = useState<AlternateDraft[]>(() =>
     (rule?.alternateAnswers ?? []).map((alt, idx) => ({
       id: idx + 1,
@@ -62,6 +63,7 @@ export function AnswerDetailDialog({
   const [incorrectPtsStr, setIncorrectPtsStr] = useState(
     rule?.incorrectPoints !== undefined ? String(rule.incorrectPoints) : "0",
   );
+  const [incorrectTouched, setIncorrectTouched] = useState(false);
   const [draftTags, setDraftTags] = useState<string[]>(rule?.tags ?? []);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,15 +80,21 @@ export function AnswerDetailDialog({
         ANSWER_CHOICES.indexOf(b as (typeof ANSWER_CHOICES)[number]),
     );
     setDraftEntry(next.join("+"));
+    if (!has) {
+      setAlternates((prev) => prev.filter((row) => row.choice !== choice));
+    }
+    if (error) setError(null);
   }
 
+  const unusedChoices = ANSWER_CHOICES.filter(
+    (c) =>
+      !selectedChoices.includes(c) &&
+      !alternates.some((alt) => alt.choice === c),
+  );
+
   function addAlternateRow() {
-    const unused =
-      ANSWER_CHOICES.find(
-        (c) =>
-          !selectedChoices.includes(c) &&
-          !alternates.some((alt) => alt.choice === c),
-      ) ?? ANSWER_CHOICES[0];
+    const unused = unusedChoices[0];
+    if (!unused) return;
     setAlternates((prev) => [
       ...prev,
       { id: nextAltId, choice: unused, pointsStr: "0.5" },
@@ -95,6 +103,20 @@ export function AnswerDetailDialog({
   }
 
   const parsedPrimaryNum = Number(draftPrimaryPts);
+  const primaryPtsError =
+    draftPrimaryPts.trim() === "" ||
+    !Number.isFinite(parsedPrimaryNum) ||
+    parsedPrimaryNum < 0
+      ? "Enter a non-negative number"
+      : null;
+
+  const parsedIncorrectNum = Number(incorrectPtsStr);
+  const incorrectPtsError =
+    incorrectEnabled &&
+    (incorrectPtsStr.trim() === "" || !Number.isFinite(parsedIncorrectNum))
+      ? "Enter a valid number"
+      : null;
+
   const maxPts = Math.max(
     Number.isFinite(parsedPrimaryNum) && parsedPrimaryNum >= 0
       ? parsedPrimaryNum
@@ -105,22 +127,38 @@ export function AnswerDetailDialog({
     }),
   );
 
+  const altConflictError = (() => {
+    const seen = new Set<string>();
+    for (const alt of alternates) {
+      if (selectedChoices.includes(alt.choice)) {
+        return `Alternate choice ${alt.choice} is already selected as a primary answer.`;
+      }
+      if (seen.has(alt.choice)) {
+        return `Duplicate alternate choice ${alt.choice}.`;
+      }
+      seen.add(alt.choice);
+    }
+    return null;
+  })();
+
   function handleConfirm() {
     setError(null);
+    setPrimaryTouched(true);
+    setIncorrectTouched(true);
     if (selectedChoices.length === 0) {
-      setError("Select at least one primary answer choice (A–E).");
+      setError("Select at least one primary answer choice (A to E).");
       return;
     }
-    const pts = Number(draftPrimaryPts);
-    if (!Number.isFinite(pts) || pts < 0) {
-      setError("Primary points must be a non-negative number.");
+    if (altConflictError) {
+      setError(altConflictError);
       return;
     }
+    if (primaryPtsError || incorrectPtsError) return;
 
     const parsedAlts: { choice: string; points: number }[] = [];
     for (const alt of alternates) {
       const altPts = Number(alt.pointsStr);
-      if (!Number.isFinite(altPts) || altPts < 0) {
+      if (alt.pointsStr.trim() === "" || !Number.isFinite(altPts) || altPts < 0) {
         setError(
           `Alternate answer ${alt.choice} points must be a non-negative number.`,
         );
@@ -129,39 +167,31 @@ export function AnswerDetailDialog({
       parsedAlts.push({ choice: alt.choice, points: altPts });
     }
 
-    let parsedIncorrect: number | undefined;
-    if (incorrectEnabled) {
-      const val = Number(incorrectPtsStr);
-      if (!Number.isFinite(val)) {
-        setError("Attempted-incorrect points must be a valid number.");
-        return;
-      }
-      parsedIncorrect = val;
-    }
-
     onSave({
       entry: selectedChoices.join("+"),
-      primaryPoints: pts,
+      primaryPoints: parsedPrimaryNum,
       rule: {
         ...(parsedAlts.length > 0 ? { alternateAnswers: parsedAlts } : {}),
-        ...(parsedIncorrect !== undefined
-          ? { incorrectPoints: parsedIncorrect }
-          : {}),
+        ...(incorrectEnabled ? { incorrectPoints: parsedIncorrectNum } : {}),
         ...(draftTags.length > 0 ? { tags: draftTags } : {}),
       },
     });
   }
 
+  const disabledReason =
+    selectedChoices.length === 0
+      ? "Select at least one primary choice"
+      : (altConflictError ?? primaryPtsError ?? incorrectPtsError ?? undefined);
+
   return (
     <Dialog
       open={open}
-      title={`Question ${questionNumber ?? ""} · ${activeVersionLabel}`}
-      confirmLabel="Apply"
-      onConfirm={handleConfirm}
+      title={`Question ${questionNumber ?? ""}, ${activeVersionLabel}`}
+      hideFooter
       onClose={onClose}
     >
       <div className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
-        <div className="flex items-center justify-between rounded-[8px] border border-[var(--border-hairline)] bg-[var(--bg-subtle)] px-3 py-2 text-[12px]">
+        <div className="flex items-center justify-between rounded-lg border border-[var(--border-hairline)] bg-[var(--bg-subtle)] px-3 py-2 text-xs">
           <span className="text-[var(--text-secondary)]">
             Maximum possible credit
           </span>
@@ -172,26 +202,35 @@ export function AnswerDetailDialog({
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-[13px] font-medium text-[var(--text-primary)]">
-              Primary Answer
+            <span className="text-[0.8125rem] font-medium text-[var(--text-primary)]">
+              Primary answer
             </span>
-            <div className="flex items-center gap-1.5">
-              <label
-                htmlFor="detail-primary-pts"
-                className="text-[12px] text-[var(--text-secondary)]"
-              >
-                Pts:
-              </label>
-              <TextInput
-                id="detail-primary-pts"
-                type="number"
-                step="0.25"
-                min="0"
-                inputSize="sm"
-                value={draftPrimaryPts}
-                onChange={(e) => setDraftPrimaryPts(e.target.value)}
-                className="w-20 font-mono tabular-nums"
-              />
+            <div className="flex flex-col items-end gap-0.5">
+              <div className="flex items-center gap-1.5">
+                <label
+                  htmlFor="detail-primary-pts"
+                  className="text-xs text-[var(--text-secondary)]"
+                >
+                  Points
+                </label>
+                <TextInput
+                  id="detail-primary-pts"
+                  type="number"
+                  step="0.25"
+                  min="0"
+                  inputSize="sm"
+                  hasError={Boolean(primaryTouched && primaryPtsError)}
+                  value={draftPrimaryPts}
+                  onBlur={() => setPrimaryTouched(true)}
+                  onChange={(e) => setDraftPrimaryPts(e.target.value)}
+                  className="w-20 font-mono tabular-nums"
+                />
+              </div>
+              {primaryTouched && primaryPtsError && (
+                <span className="text-[0.6875rem] text-[var(--danger)]">
+                  {primaryPtsError}
+                </span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -203,7 +242,7 @@ export function AnswerDetailDialog({
                   type="button"
                   onClick={() => togglePrimaryChoice(ch)}
                   aria-pressed={active}
-                  className={`flex h-9 w-9 items-center justify-center rounded-full border text-[13px] font-semibold transition-colors ${
+                  className={`flex h-9 w-9 items-center justify-center rounded-full border text-[0.8125rem] font-semibold transition-colors ${
                     active
                       ? "border-[var(--brand)] bg-[var(--brand)] text-white"
                       : "border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--brand)]"
@@ -218,15 +257,20 @@ export function AnswerDetailDialog({
 
         <div className="space-y-2 border-t border-[var(--border-hairline)] pt-3">
           <div className="flex items-center justify-between">
-            <span className="text-[13px] font-medium text-[var(--text-primary)]">
-              Alternate / Partial Credit Answers
+            <span className="text-[0.8125rem] font-medium text-[var(--text-primary)]">
+              Alternate or partial credit answers
             </span>
-            <Button variant="secondary" size="sm" onClick={addAlternateRow}>
-              + Add Answer
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={unusedChoices.length === 0}
+              onClick={addAlternateRow}
+            >
+              Add answer
             </Button>
           </div>
           {alternates.length === 0 ? (
-            <p className="text-[12px] text-[var(--text-muted)]">
+            <p className="text-xs text-[var(--text-muted)]">
               No alternate partial-credit choices added.
             </p>
           ) : (
@@ -236,23 +280,34 @@ export function AnswerDetailDialog({
                   <SelectInput
                     selectSize="sm"
                     value={alt.choice}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setAlternates((prev) =>
                         prev.map((row) =>
                           row.id === alt.id
                             ? { ...row, choice: e.target.value }
                             : row,
                         ),
-                      )
-                    }
+                      );
+                      if (error) setError(null);
+                    }}
                     className="w-24"
                     aria-label="Alternate choice"
                   >
-                    {ANSWER_CHOICES.map((ch) => (
-                      <option key={ch} value={ch}>
-                        {ch}
-                      </option>
-                    ))}
+                    {ANSWER_CHOICES.map((ch) => {
+                      const takenByPrimary = selectedChoices.includes(ch);
+                      const takenByOtherAlt = alternates.some(
+                        (other) => other.id !== alt.id && other.choice === ch,
+                      );
+                      return (
+                        <option
+                          key={ch}
+                          value={ch}
+                          disabled={takenByPrimary || takenByOtherAlt}
+                        >
+                          {ch}
+                        </option>
+                      );
+                    })}
                   </SelectInput>
                   <TextInput
                     type="number"
@@ -260,19 +315,20 @@ export function AnswerDetailDialog({
                     min="0"
                     inputSize="sm"
                     value={alt.pointsStr}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setAlternates((prev) =>
                         prev.map((row) =>
                           row.id === alt.id
                             ? { ...row, pointsStr: e.target.value }
                             : row,
                         ),
-                      )
-                    }
+                      );
+                      if (error) setError(null);
+                    }}
                     className="w-24 font-mono tabular-nums"
                     aria-label="Alternate points"
                   />
-                  <span className="text-[12px] text-[var(--text-muted)]">
+                  <span className="text-xs text-[var(--text-muted)]">
                     pts
                   </span>
                   <Button
@@ -297,27 +353,36 @@ export function AnswerDetailDialog({
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => setIncorrectEnabled(true)}
+              onClick={() => {
+                setIncorrectEnabled(true);
+                setIncorrectTouched(false);
+              }}
             >
-              + Attempted, but Incorrect
+              Add attempted incorrect points
             </Button>
           ) : (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-[8px] border border-[var(--border-hairline)] p-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border-hairline)] p-2.5">
               <div className="space-y-0.5">
-                <p className="text-[12px] font-medium text-[var(--text-primary)]">
-                  Attempted, but Incorrect
+                <p className="text-xs font-medium text-[var(--text-primary)]">
+                  Attempted, incorrect answer
                 </p>
-                <p className="text-[11px] text-[var(--text-muted)]">
-                  Award partial points or penalty when marked wrong (blank stays
-                  0).
+                <p className="text-[0.6875rem] text-[var(--text-muted)]">
+                  Award points or penalty when marked wrong (blank stays 0).
                 </p>
+                {incorrectTouched && incorrectPtsError && (
+                  <p className="text-[0.6875rem] text-[var(--danger)]">
+                    {incorrectPtsError}
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-1.5">
                 <TextInput
                   type="number"
                   step="0.25"
                   inputSize="sm"
+                  hasError={Boolean(incorrectTouched && incorrectPtsError)}
                   value={incorrectPtsStr}
+                  onBlur={() => setIncorrectTouched(true)}
                   onChange={(e) => setIncorrectPtsStr(e.target.value)}
                   className="w-20 font-mono tabular-nums"
                   aria-label="Attempted incorrect points"
@@ -335,25 +400,39 @@ export function AnswerDetailDialog({
         </div>
 
         <div className="border-t border-[var(--border-hairline)] pt-3">
-          <FormField id="detail-question-tags" label="Question Tags">
+          <FormField id="detail-question-tags" label="Question tags">
             <TagInput
               id="detail-question-tags"
               tags={draftTags}
               onChange={setDraftTags}
               suggestions={tagSuggestions}
-              placeholder="e.g. Algebra, Standard 4.2"
+              placeholder="e.g. osmosis, cells"
             />
           </FormField>
-          <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-            Used to group questions inside the Tag report tab.
+          <p className="mt-1 text-[0.6875rem] text-[var(--text-muted)]">
+            Used to group questions inside the Tags tab.
           </p>
         </div>
 
         {error && (
-          <div className="rounded-[8px] border border-red-300 bg-[var(--danger-bg)] px-3 py-2 text-[13px] text-[var(--danger-text)]">
+          <div className="rounded-lg border border-red-300 bg-[var(--danger-bg)] px-3 py-2 text-[0.8125rem] text-[var(--danger-text)]">
             {error}
           </div>
         )}
+
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border-hairline)] pt-3">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={Boolean(disabledReason)}
+            disabledReason={disabledReason}
+            onClick={handleConfirm}
+          >
+            Apply to {activeVersionLabel}
+          </Button>
+        </div>
       </div>
     </Dialog>
   );

@@ -1,38 +1,49 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { ConfirmationGate } from "@/components/quiz/ConfirmationGate";
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { EmptyState } from "@/components/ui/EmptyState";
 import { SelectInput } from "@/components/ui/Field";
-import { DocumentIcon } from "@/components/ui/Icons";
-import { StatCard } from "@/components/ui/StatCard";
-import { computeItemAnalysis } from "@/lib/itemAnalysis";
+import { ChevronDownIcon } from "@/components/ui/Icons";
+import { downloadTableCsv, slugifyFilename } from "@/lib/csvExport";
+import {
+  computeItemAnalysis,
+  summarizeQuestionResponse,
+  type ChoiceDistribution,
+} from "@/lib/itemAnalysis";
 import { ANSWER_CHOICES } from "@/lib/types";
 import {
   getAvailableKeyVersions,
+  resolveQuizKeyForVersion,
   type KeyVersionId,
   type Paper,
   type Quiz,
 } from "@/lib/workspace";
 
-type SortMode = "question" | "hardest" | "easiest";
+type SortMode = "hardest" | "easiest" | "question";
+
+const MIN_CONFIRMED_FOR_ANALYSIS = 5;
 
 export interface ItemAnalysisTabProps {
   quiz: Quiz;
-  batchPapers: Paper[];
-  allPapers: Paper[];
-  hasMultipleBatches: boolean;
+  papers: Paper[];
+  provisionalBanner?: ReactNode;
+  onUploadPapers?: () => void;
 }
 
 export function ItemAnalysisTab({
   quiz,
-  batchPapers,
-  allPapers,
-  hasMultipleBatches,
+  papers,
+  provisionalBanner,
+  onUploadPapers,
 }: ItemAnalysisTabProps) {
-  const [scope, setScope] = useState<"batch" | "all">("batch");
-  const [sortBy, setSortBy] = useState<SortMode>("question");
+  const [sortBy, setSortBy] = useState<SortMode>("hardest");
   const [keyVersionFilter, setKeyVersionFilter] = useState<string>("all");
+  const [showAll, setShowAll] = useState(false);
+  const [expandedQuestions, setExpandedQuestions] = useState<
+    Record<number, boolean>
+  >({});
 
   const availableVersions = useMemo(
     () => getAvailableKeyVersions(quiz),
@@ -44,17 +55,37 @@ export function ItemAnalysisTab({
       ? (keyVersionFilter as KeyVersionId)
       : undefined;
 
-  const activePapers =
-    hasMultipleBatches && scope === "all" ? allPapers : batchPapers;
+  const matchingPapers = useMemo(
+    () =>
+      papers.filter((p) => {
+        if (p.answers.length !== quiz.answerKey.length) {
+          return false;
+        }
+        if (effectiveKeyFilter) {
+          return (
+            resolveQuizKeyForVersion(quiz, p.keyVersion).version ===
+            effectiveKeyFilter
+          );
+        }
+        return true;
+      }),
+    [papers, quiz, effectiveKeyFilter],
+  );
+
+  const confirmedCount = useMemo(
+    () => matchingPapers.filter((p) => !p.needsReview).length,
+    [matchingPapers],
+  );
+  const unconfirmedCount = matchingPapers.length - confirmedCount;
 
   const analysis = useMemo(
     () =>
       computeItemAnalysis(
         quiz,
-        activePapers,
+        papers,
         effectiveKeyFilter ? { keyVersion: effectiveKeyFilter } : undefined,
       ),
-    [quiz, activePapers, effectiveKeyFilter],
+    [quiz, papers, effectiveKeyFilter],
   );
 
   const sortedQuestions = useMemo(() => {
@@ -73,58 +104,112 @@ export function ItemAnalysisTab({
     return items;
   }, [analysis.questions, sortBy]);
 
+  const effectiveShowAll = showAll || sortBy !== "hardest";
+  const visibleQuestions = effectiveShowAll
+    ? sortedQuestions
+    : sortedQuestions.slice(0, 5);
+
   const hasMultiMarks = analysis.questions.some(
     (q) => q.choiceCounts.Multiple > 0,
   );
 
+  function toggleQuestion(questionNumber: number) {
+    setExpandedQuestions((prev) => ({
+      ...prev,
+      [questionNumber]: !prev[questionNumber],
+    }));
+  }
+
+  function handleExportTable() {
+    if (analysis.gradedPaperCount === 0) return;
+    const slug = slugifyFilename(quiz.name);
+    const headers = [
+      "Question",
+      "Key",
+      "Correct",
+      ...(analysis.gradedPaperCount >= 4 ? ["Discrimination"] : []),
+      ...ANSWER_CHOICES,
+      "Blank",
+      ...(hasMultiMarks ? ["Multi"] : []),
+    ];
+    const rows = sortedQuestions.map((item) => [
+      `Q${item.questionNumber}`,
+      item.correctKey,
+      `${item.correctCount} of ${analysis.gradedPaperCount} (${item.correctPct.toFixed(0)}%)`,
+      ...(analysis.gradedPaperCount >= 4
+        ? [
+            item.discriminationIndex !== null
+              ? item.discriminationIndex.toFixed(2)
+              : "",
+          ]
+        : []),
+      ...ANSWER_CHOICES.map((ch) => item.choiceCounts[ch]),
+      item.choiceCounts.Blank,
+      ...(hasMultiMarks ? [item.choiceCounts.Multiple] : []),
+    ]);
+    downloadTableCsv(`${slug}-item-analysis.csv`, headers, rows);
+  }
+
+  if (confirmedCount < MIN_CONFIRMED_FOR_ANALYSIS) {
+    const remainingToUnlock = MIN_CONFIRMED_FOR_ANALYSIS - confirmedCount;
+    const statusDescription =
+      matchingPapers.length === 0
+        ? "No papers scanned yet. Upload answer sheets to start building question analysis."
+        : unconfirmedCount > 0
+          ? `${confirmedCount} of ${matchingPapers.length} ${matchingPapers.length === 1 ? "paper is" : "papers are"} confirmed and ${unconfirmedCount} ${unconfirmedCount === 1 ? "needs" : "need"} review. Item breakdown appears once ${MIN_CONFIRMED_FOR_ANALYSIS} papers are confirmed.`
+          : `${confirmedCount} confirmed ${confirmedCount === 1 ? "paper" : "papers"} scanned. Upload ${remainingToUnlock} more to reveal reliable question patterns.`;
+
+    return (
+      <div className="space-y-4">
+        {availableVersions.length > 1 && (
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="item-analysis-key-version"
+              className="text-xs font-medium text-[var(--text-secondary)]"
+            >
+              Key
+            </label>
+            <SelectInput
+              id="item-analysis-key-version"
+              selectSize="sm"
+              value={keyVersionFilter}
+              onChange={(e) => setKeyVersionFilter(e.target.value)}
+              className="!w-auto"
+            >
+              <option value="all">All versions</option>
+              {availableVersions.map((ver) => (
+                <option key={ver} value={ver}>
+                  Key {ver}
+                </option>
+              ))}
+            </SelectInput>
+          </div>
+        )}
+
+        <ConfirmationGate
+          title={`Item analysis needs at least ${MIN_CONFIRMED_FOR_ANALYSIS} confirmed papers`}
+          description={statusDescription}
+          confirmed={confirmedCount}
+          needed={MIN_CONFIRMED_FOR_ANALYSIS}
+          unconfirmedCount={unconfirmedCount}
+          quizId={quiz.id}
+          onUploadPapers={onUploadPapers}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {hasMultipleBatches && (
-            <div
-              role="group"
-              aria-label="Analysis scope"
-              className="inline-flex rounded-[8px] border border-[var(--border-strong)] bg-[var(--bg-surface)] p-0.5 text-[12px] font-medium"
-            >
-              <button
-                type="button"
-                aria-pressed={scope === "batch"}
-                onClick={() => setScope("batch")}
-                className={`rounded-[6px] px-3 py-1 transition-colors ${
-                  scope === "batch"
-                    ? "bg-[var(--brand)] text-white"
-                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                }`}
-              >
-                Current batch
-              </button>
-              <button
-                type="button"
-                aria-pressed={scope === "all"}
-                onClick={() => setScope("all")}
-                className={`rounded-[6px] px-3 py-1 transition-colors ${
-                  scope === "all"
-                    ? "bg-[var(--brand)] text-white"
-                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                }`}
-              >
-                All batches
-              </button>
-            </div>
-          )}
-          <span className="text-[12px] text-[var(--text-muted)]">
-            {analysis.gradedPaperCount} graded paper
-            {analysis.gradedPaperCount === 1 ? "" : "s"}
-          </span>
-        </div>
+      {unconfirmedCount > 0 && provisionalBanner}
 
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           {availableVersions.length > 1 && (
             <div className="flex items-center gap-2">
               <label
                 htmlFor="item-analysis-key-version"
-                className="text-[12px] font-medium text-[var(--text-secondary)]"
+                className="text-xs font-medium text-[var(--text-secondary)]"
               >
                 Key
               </label>
@@ -144,12 +229,13 @@ export function ItemAnalysisTab({
               </SelectInput>
             </div>
           )}
+
           <div className="flex items-center gap-2">
             <label
               htmlFor="item-analysis-sort"
-              className="text-[12px] font-medium text-[var(--text-secondary)]"
+              className="text-xs font-medium text-[var(--text-secondary)]"
             >
-              Sort
+              Sort by
             </label>
             <SelectInput
               id="item-analysis-sort"
@@ -158,151 +244,223 @@ export function ItemAnalysisTab({
               onChange={(e) => setSortBy(e.target.value as SortMode)}
               className="!w-auto"
             >
-              <option value="question">Question #</option>
               <option value="hardest">Hardest first</option>
               <option value="easiest">Easiest first</option>
+              <option value="question">Question number</option>
             </SelectInput>
           </div>
+
+          <span className="text-xs text-[var(--text-secondary)] tabular-nums">
+            {effectiveShowAll || sortedQuestions.length <= 5
+              ? `Showing all ${sortedQuestions.length} questions`
+              : `Showing 5 hardest of ${sortedQuestions.length}`}
+          </span>
         </div>
+
+        <Button variant="secondary" size="sm" onClick={handleExportTable}>
+          Export this table
+        </Button>
       </div>
 
-      {analysis.gradedPaperCount === 0 ? (
-        <EmptyState
-          icon={<DocumentIcon />}
-          title="No graded papers yet"
-          description="Grade at least one paper to view per-question accuracy and choice distributions."
-        />
-      ) : (
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <StatCard label="Graded papers" value={analysis.gradedPaperCount} />
-            <StatCard
-              label="Hardest question"
-              value={
-                analysis.hardestQuestion
-                  ? `Q${analysis.hardestQuestion.questionNumber}`
-                  : "—"
-              }
-              hint={
-                analysis.hardestQuestion
-                  ? `${analysis.hardestQuestion.correctPct.toFixed(1)}% correct`
-                  : undefined
-              }
-            />
-            <StatCard
-              label="Easiest question"
-              value={
-                analysis.easiestQuestion
-                  ? `Q${analysis.easiestQuestion.questionNumber}`
-                  : "—"
-              }
-              hint={
-                analysis.easiestQuestion
-                  ? `${analysis.easiestQuestion.correctPct.toFixed(1)}% correct`
-                  : undefined
-              }
-            />
-          </div>
+      <Card padded={false} className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead>
+              <tr className="border-b border-[var(--border-hairline)] bg-[var(--bg-subtle)] text-xs font-semibold text-[var(--text-secondary)]">
+                <th className="px-4 py-2.5 whitespace-nowrap">Question</th>
+                <th className="px-4 py-2.5 whitespace-nowrap">Key</th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap">
+                  Correct
+                </th>
+                <th className="px-4 py-2.5 whitespace-nowrap">
+                  Response pattern
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border-hairline)]">
+              {visibleQuestions.map((item) => {
+                const accepted =
+                  item.correctKey === "Per key"
+                    ? []
+                    : item.correctKey.split("+").filter(Boolean);
+                const isLow = item.correctPct < 50;
+                const isExpanded = Boolean(
+                  expandedQuestions[item.questionNumber],
+                );
+                const summary = summarizeQuestionResponse(
+                  item,
+                  analysis.gradedPaperCount,
+                );
+                const detailBuckets: Array<{
+                  key: keyof ChoiceDistribution;
+                  label: string;
+                  isKeyChoice: boolean;
+                }> = [
+                  ...ANSWER_CHOICES.map((ch) => ({
+                    key: ch as keyof ChoiceDistribution,
+                    label: ch,
+                    isKeyChoice: accepted.includes(ch),
+                  })),
+                  { key: "Blank", label: "Blank", isKeyChoice: false },
+                  ...(item.choiceCounts.Multiple > 0
+                    ? [
+                        {
+                          key: "Multiple" as const,
+                          label: "Multi",
+                          isKeyChoice: false,
+                        },
+                      ]
+                    : []),
+                ];
 
-          <Card padded={false} className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-left text-[13px]">
-                <thead>
-                  <tr className="border-b border-[var(--border-hairline)] bg-[var(--bg-subtle)]/60 text-[12px] font-medium text-[var(--text-secondary)]">
-                    <th className="px-4 py-2.5">Q#</th>
-                    <th className="px-3 py-2.5">Key</th>
-                    <th className="min-w-[160px] px-3 py-2.5">% Correct</th>
-                    {ANSWER_CHOICES.map((ch) => (
-                      <th key={ch} className="px-3 py-2.5 text-right">
-                        {ch}
-                      </th>
-                    ))}
-                    <th className="px-3 py-2.5 text-right">Blank</th>
-                    {hasMultiMarks && (
-                      <th className="px-3 py-2.5 text-right">Multi</th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--border-hairline)]">
-                  {sortedQuestions.map((item) => {
-                    const accepted = item.correctKey
-                      .split("+")
-                      .filter(Boolean);
-                    const barColor =
-                      item.correctPct >= 75
-                        ? "bg-[var(--brand)]"
-                        : item.correctPct >= 50
-                          ? "bg-amber-500"
-                          : "bg-[var(--danger)]";
-                    return (
-                      <tr
-                        key={item.questionNumber}
-                        className="hover:bg-[var(--bg-subtle)]/40"
-                      >
-                        <td className="px-4 py-2.5 font-mono font-medium text-[var(--text-primary)] tabular-nums">
+                return (
+                  <Fragment key={item.questionNumber}>
+                    <tr
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement)?.closest("button, a")) {
+                          return;
+                        }
+                        toggleQuestion(item.questionNumber);
+                      }}
+                      className="cursor-pointer transition-colors hover:bg-black/[0.02]"
+                    >
+                      <td className="px-4 py-3 font-semibold text-[var(--text-primary)] tabular-nums">
+                        <button
+                          type="button"
+                          aria-expanded={isExpanded}
+                          onClick={() => toggleQuestion(item.questionNumber)}
+                          className="inline-flex items-center gap-2 rounded-md text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]"
+                        >
+                          <span
+                            className={`inline-flex shrink-0 text-[var(--text-muted)] transition-transform ${
+                              isExpanded ? "rotate-0" : "-rotate-90"
+                            }`}
+                          >
+                            <ChevronDownIcon />
+                          </span>
                           <span>Q{item.questionNumber}</span>
-                          {item.flaggedCount > 0 && (
-                            <span
-                              title={`${item.flaggedCount} unresolved flagged mark${item.flaggedCount === 1 ? "" : "s"}`}
-                              className="ml-1.5 rounded bg-[var(--warning-bg)] px-1 py-0.5 font-sans text-[10px] font-medium text-[var(--warning-text)]"
-                            >
-                              {item.flaggedCount} flagged
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5 font-mono font-semibold text-[var(--brand-text)]">
-                          {item.correctKey === "Per key" ? (
-                            <span className="font-sans text-[11px] font-medium text-[var(--text-muted)]">
-                              Per key
-                            </span>
-                          ) : (
-                            item.correctKey
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <div className="flex items-center gap-2.5">
-                            <div className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--bg-subtle)]">
-                              <div
-                                className={`h-full rounded-full ${barColor}`}
-                                style={{ width: `${item.correctPct}%` }}
-                              />
+                        </button>
+                      </td>
+                      <td className="px-4 py-3 font-bold text-[var(--text-primary)]">
+                        {item.correctKey === "Per key" ? (
+                          <span className="text-xs font-medium text-[var(--text-muted)]">
+                            Per key
+                          </span>
+                        ) : (
+                          item.correctKey
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right whitespace-nowrap tabular-nums">
+                        <span className="font-semibold text-[var(--text-primary)]">
+                          {item.correctPct.toFixed(0)}%
+                        </span>
+                        {isLow && (
+                          <span className="ml-1.5 inline-block rounded-md bg-[var(--warning-bg)] px-1.5 py-0.5 text-[0.6875rem] font-semibold text-[var(--warning-text)]">
+                            Low
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-[var(--text-secondary)] tabular-nums">
+                        {summary}
+                      </td>
+                    </tr>
+
+                    {isExpanded && (
+                      <tr className="bg-[var(--bg-subtle)]/50">
+                        <td colSpan={4} className="px-4 py-3.5">
+                          <div className="space-y-3">
+                            <p className="text-xs font-medium text-[var(--text-secondary)] tabular-nums">
+                              Correct: {item.correctCount} of{" "}
+                              {analysis.gradedPaperCount} papers (
+                              {item.correctPct.toFixed(0)}%)
+                              {item.discriminationIndex !== null && (
+                                <>
+                                  {" "}
+                                  | Discrimination:{" "}
+                                  {item.discriminationIndex > 0 ? "+" : ""}
+                                  {item.discriminationIndex.toFixed(2)} (
+                                  {item.discriminationIndex >= 0.3
+                                    ? "Strong"
+                                    : item.discriminationIndex >= 0.15
+                                      ? "Moderate"
+                                      : item.discriminationIndex >= 0
+                                        ? "Weak"
+                                        : "Negative"}
+                                  )
+                                </>
+                              )}
+                            </p>
+                            <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 lg:grid-cols-7">
+                              {detailBuckets.map((bucket) => {
+                                const count = item.choiceCounts[bucket.key];
+                                const widthPct =
+                                  analysis.gradedPaperCount > 0 && count > 0
+                                    ? Math.max(
+                                        (count / analysis.gradedPaperCount) *
+                                          100,
+                                        6,
+                                      )
+                                    : 0;
+                                return (
+                                  <div
+                                    key={bucket.key}
+                                    className={`rounded-lg border px-2.5 py-2 ${
+                                      bucket.isKeyChoice
+                                        ? "border-[var(--brand)] bg-[var(--brand-subtle)]"
+                                        : "border-[var(--border-hairline)] bg-[var(--bg-surface)]"
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between gap-1 text-xs">
+                                      <span
+                                        className={
+                                          bucket.isKeyChoice
+                                            ? "font-bold text-[var(--brand-text)]"
+                                            : "font-medium text-[var(--text-secondary)]"
+                                        }
+                                      >
+                                        {bucket.label}
+                                      </span>
+                                      <span className="font-semibold text-[var(--text-primary)] tabular-nums">
+                                        {count}
+                                      </span>
+                                    </div>
+                                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-black/[0.08]">
+                                      <div
+                                        className={`h-full rounded-full ${
+                                          bucket.isKeyChoice
+                                            ? "bg-[var(--brand)]"
+                                            : "bg-zinc-500"
+                                        }`}
+                                        style={{ width: `${widthPct}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
-                            <span className="w-12 text-right font-mono text-[12px] text-[var(--text-primary)] tabular-nums">
-                              {item.correctPct.toFixed(1)}%
-                            </span>
                           </div>
                         </td>
-                        {ANSWER_CHOICES.map((ch) => {
-                          const isKeyChoice = accepted.includes(ch);
-                          const count = item.choiceCounts[ch];
-                          return (
-                            <td
-                              key={ch}
-                              className={`px-3 py-2.5 text-right font-mono tabular-nums ${
-                                isKeyChoice
-                                  ? "bg-[var(--brand)]/10 font-semibold text-[var(--brand-text)]"
-                                  : "text-[var(--text-secondary)]"
-                              }`}
-                            >
-                              {count}
-                            </td>
-                          );
-                        })}
-                        <td className="px-3 py-2.5 text-right font-mono text-[var(--text-secondary)] tabular-nums">
-                          {item.choiceCounts.Blank}
-                        </td>
-                        {hasMultiMarks && (
-                          <td className="px-3 py-2.5 text-right font-mono text-[var(--text-secondary)] tabular-nums">
-                            {item.choiceCounts.Multiple}
-                          </td>
-                        )}
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </Card>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {sortedQuestions.length > 5 && sortBy === "hardest" && (
+        <div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setShowAll((v) => !v)}
+          >
+            {showAll
+              ? "Show hardest 5 only"
+              : `Show all ${sortedQuestions.length} questions`}
+          </Button>
         </div>
       )}
     </div>

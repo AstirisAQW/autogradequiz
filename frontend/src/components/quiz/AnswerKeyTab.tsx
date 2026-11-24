@@ -1,16 +1,18 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { AnswerKeyGrid } from "@/components/AnswerKeyGrid";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnswerDetailDialog } from "@/components/quiz/AnswerDetailDialog";
+import { AnswerKeyGrid } from "@/components/quiz/AnswerKeyGrid";
+import { ActionMenu } from "@/components/ui/ActionMenu";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormField, TextInput } from "@/components/ui/Field";
+import { WarningIcon } from "@/components/ui/Icons";
 import { useToast } from "@/components/ui/Toast";
-import { ApiError, scanKeyFromImage } from "@/lib/api";
+import { getErrorMessage, scanKeyFromImage } from "@/lib/api";
 import { collectAllQuizTags } from "@/lib/tagReport";
-import type { TemplateId } from "@/lib/types";
+import { ANSWER_CHOICES, type TemplateId } from "@/lib/types";
 import {
   KEY_VERSION_IDS,
   saveQuiz,
@@ -28,8 +30,9 @@ interface VersionDraft {
 
 export interface AnswerKeyTabProps {
   quiz: Quiz;
-  activeBatchId: string | null;
-  onSaved: (preferredBatchId?: string | null) => Promise<void>;
+  paperCount: number;
+  onDirtyChange?: (dirty: boolean) => void;
+  onSaved: () => Promise<void>;
 }
 
 function normalizeRulesList(
@@ -87,15 +90,22 @@ function buildInitialDrafts(
 
 export function AnswerKeyTab({
   quiz,
-  activeBatchId,
+  paperCount,
+  onDirtyChange,
   onSaved,
 }: AnswerKeyTabProps) {
   const { push: pushToast } = useToast();
   const questionCount = quiz.answerKey.length;
 
+  const initialDrafts = useMemo(() => buildInitialDrafts(quiz), [quiz]);
+  const initialSnapshot = useMemo(
+    () => JSON.stringify(initialDrafts),
+    [initialDrafts],
+  );
+
   const [versionsDraft, setVersionsDraft] = useState<
     Partial<Record<KeyVersionId, VersionDraft>>
-  >(() => buildInitialDrafts(quiz));
+  >(() => initialDrafts);
   const [activeVersion, setActiveVersion] = useState<KeyVersionId>("A");
   const [savingKey, setSavingKey] = useState(false);
   const [scanningKey, setScanningKey] = useState(false);
@@ -106,7 +116,8 @@ export function AnswerKeyTab({
   );
   const [bulkPointsOpen, setBulkPointsOpen] = useState(false);
   const [bulkPointsStr, setBulkPointsStr] = useState("1");
-  const [bulkPointsError, setBulkPointsError] = useState<string | null>(null);
+  const [bulkPointsTouched, setBulkPointsTouched] = useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
 
   const enabledVersions = KEY_VERSION_IDS.filter(
     (v) => versionsDraft[v] !== undefined,
@@ -115,6 +126,15 @@ export function AnswerKeyTab({
     ? activeVersion
     : "A";
   const activeDraft = versionsDraft[effectiveActiveVersion]!;
+
+  const isDirty = useMemo(
+    () => JSON.stringify(versionsDraft) !== initialSnapshot,
+    [versionsDraft, initialSnapshot],
+  );
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   const allTagSuggestions = useMemo(() => {
     const tagSet = new Set<string>(collectAllQuizTags(quiz));
@@ -155,13 +175,14 @@ export function AnswerKeyTab({
     }));
     setActiveVersion(nextVer);
     pushToast(
-      `Added Key ${nextVer} copied from A: Primary. Update altered questions then save.`,
+      `Added Key ${nextVer} copied from Key A. Edit differences then save.`,
       "info",
     );
   }
 
   function handleRemoveVersion(ver: KeyVersionId) {
     if (ver === "A") return;
+    const removedDraft = versionsDraft[ver];
     setVersionsDraft((prev) => {
       const next = { ...prev };
       delete next[ver];
@@ -170,6 +191,90 @@ export function AnswerKeyTab({
     if (effectiveActiveVersion === ver) {
       setActiveVersion("A");
     }
+    if (removedDraft) {
+      pushToast(`Removed Key ${ver}.`, "info", {
+        actionLabel: "Undo",
+        onAction: () => {
+          setVersionsDraft((prev) => ({ ...prev, [ver]: removedDraft }));
+          setActiveVersion(ver);
+          pushToast(`Restored Key ${ver}.`, "success");
+        },
+      });
+    }
+  }
+
+  function handleConfirmClearAll() {
+    const targetVer = effectiveActiveVersion;
+    const previousEntries = [...activeDraft.answerKey];
+    setVersionsDraft((prev) => {
+      const curr = prev[targetVer];
+      if (!curr) return prev;
+      return {
+        ...prev,
+        [targetVer]: {
+          ...curr,
+          answerKey: Array<string>(questionCount).fill(""),
+        },
+      };
+    });
+    setClearConfirmOpen(false);
+    pushToast(`Cleared all answers in Key ${targetVer}.`, "info", {
+      actionLabel: "Undo",
+      onAction: () => {
+        setVersionsDraft((prev) => {
+          const existing = prev[targetVer];
+          if (!existing) return prev;
+          return {
+            ...prev,
+            [targetVer]: { ...existing, answerKey: previousEntries },
+          };
+        });
+        setActiveVersion(targetVer);
+        pushToast(`Restored Key ${targetVer} answers.`, "success");
+      },
+    });
+  }
+
+  function handleFillRepeatingPattern() {
+    const targetVer = effectiveActiveVersion;
+    const previousEntries = [...activeDraft.answerKey];
+    const nextEntries = Array.from(
+      { length: questionCount },
+      (_, idx) => ANSWER_CHOICES[idx % ANSWER_CHOICES.length],
+    );
+    setVersionsDraft((prev) => {
+      const curr = prev[targetVer];
+      if (!curr) return prev;
+      return {
+        ...prev,
+        [targetVer]: { ...curr, answerKey: nextEntries },
+      };
+    });
+    if (previousEntries.some((entry) => entry !== "")) {
+      pushToast(`Filled Key ${targetVer} with repeating A, B, C, D, E.`, "info", {
+        actionLabel: "Undo",
+        onAction: () => {
+          setVersionsDraft((prev) => {
+            const existing = prev[targetVer];
+            if (!existing) return prev;
+            return {
+              ...prev,
+              [targetVer]: { ...existing, answerKey: previousEntries },
+            };
+          });
+          setActiveVersion(targetVer);
+          pushToast(`Restored Key ${targetVer} answers.`, "success");
+        },
+      });
+    }
+  }
+
+  function handleDiscardChanges() {
+    setVersionsDraft(buildInitialDrafts(quiz));
+    if (!quiz.keyVersions?.[activeVersion]) {
+      setActiveVersion("A");
+    }
+    pushToast("Discarded unsaved answer key changes.");
   }
 
   async function handleScanMasterKey(e: React.ChangeEvent<HTMLInputElement>) {
@@ -193,32 +298,29 @@ export function AnswerKeyTab({
         );
       } else {
         pushToast(
-          `Answer key scanned into ${effectiveActiveVersion === "A" ? "A: Primary" : `Key ${effectiveActiveVersion}`}. Click Save answer key to apply.`,
+          `Answer key scanned into Key ${effectiveActiveVersion}. Select Save answer key to apply.`,
           "success",
         );
       }
     } catch (err) {
-      pushToast(
-        err instanceof ApiError
-          ? err.detail
-          : "Could not scan master key image.",
-        "error",
-      );
+      pushToast(getErrorMessage(err, "Could not scan master key image."), "error");
     } finally {
       setScanningKey(false);
     }
   }
 
+  const bulkVal = Number(bulkPointsStr);
+  const bulkPointsError =
+    bulkPointsStr.trim() === "" || !Number.isFinite(bulkVal) || bulkVal < 0
+      ? "Points must be a non-negative number (e.g. 0.5, 1, 2.5)."
+      : null;
+
   function handleApplyBulkPoints() {
-    setBulkPointsError(null);
-    const val = Number(bulkPointsStr);
-    if (!Number.isFinite(val) || val < 0) {
-      setBulkPointsError("Points must be a non-negative number (e.g. 0.5, 1, 2.5).");
-      return;
-    }
+    setBulkPointsTouched(true);
+    if (bulkPointsError) return;
     updateActiveDraft((curr) => ({
       ...curr,
-      points: Array<number>(questionCount).fill(val),
+      points: Array<number>(questionCount).fill(bulkVal),
     }));
     setBulkPointsOpen(false);
   }
@@ -230,7 +332,7 @@ export function AnswerKeyTab({
       if (!draft || draft.answerKey.some((entry) => !entry)) {
         setActiveVersion(ver);
         pushToast(
-          `Select an answer for every question in ${ver === "A" ? "A: Primary" : `Key ${ver}`} before saving.`,
+          `Select an answer for every question in Key ${ver} before saving.`,
           "error",
         );
         return;
@@ -238,7 +340,8 @@ export function AnswerKeyTab({
     }
 
     const primary = versionsDraft.A!;
-    const keyVersionsPayload: Partial<Record<KeyVersionId, KeyVersionData>> = {};
+    const keyVersionsPayload: Partial<Record<KeyVersionId, KeyVersionData>> =
+      {};
     for (const ver of ["B", "C", "D"] as const) {
       const draft = versionsDraft[ver];
       if (draft) {
@@ -256,23 +359,23 @@ export function AnswerKeyTab({
         id: quiz.id,
         name: quiz.name,
         templateId: quiz.templateId,
-        questionCount,
         date: quiz.date,
-        folder: quiz.folder,
-        sectionIds: quiz.sectionIds,
+        classIds: quiz.classIds,
         tags: quiz.tags,
         answerKey: primary.answerKey,
         points: primary.points,
         questionRules: primary.questionRules,
         keyVersions: keyVersionsPayload,
       });
-      await onSaved(activeBatchId);
-      pushToast("Answer key saved and papers rescored.", "success");
-    } catch (err) {
+      await onSaved();
       pushToast(
-        err instanceof Error ? err.message : "Could not save answer key.",
-        "error",
+        paperCount > 0
+          ? `Saved answer key and regraded ${paperCount} ${paperCount === 1 ? "paper" : "papers"}.`
+          : "Saved answer key.",
+        "success",
       );
+    } catch (err) {
+      pushToast(getErrorMessage(err, "Could not save answer key."), "error");
     } finally {
       setSavingKey(false);
     }
@@ -283,17 +386,50 @@ export function AnswerKeyTab({
   );
 
   const canAddMoreKeys = enabledVersions.length < KEY_VERSION_IDS.length;
+  const nextVer = (["B", "C", "D"] as const).find(
+    (v) => versionsDraft[v] === undefined,
+  );
 
   return (
     <Card className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2>Answer key</h2>
-          <p className="text-[12px] text-[var(--text-muted)]">
-            Configure primary choices, partial credit, penalties, tags, and A–D
-            test versions. Saving rescores graded papers automatically.
-          </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            role="tablist"
+            aria-label="Answer key versions"
+            className="inline-flex flex-wrap items-center gap-1 rounded-[10px] border border-[var(--border-hairline)] bg-[var(--bg-subtle)] p-0.5"
+          >
+            {enabledVersions.map((ver) => {
+              const selected = ver === effectiveActiveVersion;
+              return (
+                <button
+                  key={ver}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => setActiveVersion(ver)}
+                  className={`min-h-8 rounded-lg px-3 py-1.5 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)] ${
+                    selected
+                      ? "bg-[var(--brand)] font-semibold text-white"
+                      : "font-medium text-[var(--text-secondary)] hover:bg-black/[0.04] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  Key {ver}
+                </button>
+              );
+            })}
+          </div>
+          {canAddMoreKeys && nextVer && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleAddKeyVersion}
+            >
+              Add Key {nextVer}
+            </Button>
+          )}
         </div>
+
         <div className="flex flex-wrap items-center gap-2">
           <input
             ref={keyFileRef}
@@ -304,69 +440,94 @@ export function AnswerKeyTab({
           />
           <Button
             variant="secondary"
+            size="sm"
             disabled={scanningKey}
             onClick={() => keyFileRef.current?.click()}
           >
-            {scanningKey ? "Scanning…" : "Scan key from sheet"}
+            {scanningKey ? "Scanning..." : "Scan key from sheet"}
           </Button>
-          <Button
-            variant="primary"
-            disabled={savingKey || anyIncomplete}
-            disabledReason={
-              anyIncomplete
-                ? "Select an answer for every question across all key versions"
-                : undefined
-            }
-            onClick={() => void handleSaveAnswerKey()}
-          >
-            {savingKey ? "Saving…" : "Save answer key"}
-          </Button>
+          <ActionMenu
+            label="More answer key actions"
+            items={[
+              {
+                id: "fill-pattern",
+                label: "Fill A, B, C, D, E pattern",
+                onClick: handleFillRepeatingPattern,
+              },
+              { kind: "divider", id: "div-key-fill" },
+              {
+                id: "clear-answers",
+                label: "Clear all answers",
+                variant: "danger",
+                onClick: () => setClearConfirmOpen(true),
+              },
+              ...(effectiveActiveVersion !== "A"
+                ? [
+                    { kind: "divider" as const, id: "div-key-remove" },
+                    {
+                      id: "remove-version",
+                      label: `Remove Key ${effectiveActiveVersion}`,
+                      variant: "danger" as const,
+                      onClick: () => handleRemoveVersion(effectiveActiveVersion),
+                    },
+                  ]
+                : []),
+            ]}
+          />
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-hairline)] pb-3">
-        <div className="flex flex-wrap items-center gap-1.5" role="tablist">
-          {enabledVersions.map((ver) => {
-            const selected = ver === effectiveActiveVersion;
-            return (
-              <button
-                key={ver}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                onClick={() => setActiveVersion(ver)}
-                className={`rounded-[8px] border px-3 py-1.5 text-[13px] font-medium transition-colors ${
-                  selected
-                    ? "border-[var(--brand)] bg-[var(--brand)] text-white"
-                    : "border-[var(--border-strong)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:bg-[var(--bg-subtle)]"
-                }`}
-              >
-                {ver === "A" ? "A: Primary" : `Key ${ver}`}
-              </button>
-            );
-          })}
-          {canAddMoreKeys && (
+      {quiz.answerKey.some((a) => !a) && (
+        <div className="flex items-center gap-2.5 rounded-xl border border-amber-700/25 bg-[var(--warning-bg)] px-4 py-3 text-[0.8125rem] font-medium text-[var(--warning-text)]">
+          <WarningIcon />
+          <span>
+            Answer key not set yet. Select bubbles below or use Scan key from
+            sheet, then save to enable grading.
+          </span>
+        </div>
+      )}
+
+      {isDirty ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-700/25 bg-[var(--warning-bg)] px-4 py-3 text-[0.8125rem]">
+          <div className="flex items-center gap-2.5 font-medium text-[var(--warning-text)]">
+            <WarningIcon />
+            <span>
+              {paperCount > 0
+                ? `Unsaved changes. Saving will regrade ${paperCount} ${paperCount === 1 ? "paper" : "papers"}.`
+                : "Unsaved changes."}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="secondary"
               size="sm"
-              onClick={handleAddKeyVersion}
+              disabled={savingKey}
+              onClick={handleDiscardChanges}
             >
-              + Add Key
+              Discard
             </Button>
-          )}
+            <Button
+              variant="primary"
+              disabled={savingKey || anyIncomplete}
+              disabledReason={
+                anyIncomplete
+                  ? "Select an answer for every question across all key versions"
+                  : undefined
+              }
+              onClick={() => void handleSaveAnswerKey()}
+            >
+              {savingKey ? "Saving..." : "Save answer key"}
+            </Button>
+          </div>
         </div>
-
-        {effectiveActiveVersion !== "A" && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleRemoveVersion(effectiveActiveVersion)}
-            className="text-[var(--danger)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
-          >
-            Remove Key {effectiveActiveVersion}
-          </Button>
-        )}
-      </div>
+      ) : (
+        <p className="text-[0.8125rem] text-[var(--text-secondary)]">
+          Key {effectiveActiveVersion} is saved.
+          {paperCount > 0
+            ? ` Saving changes to this key regrades ${paperCount} ${paperCount === 1 ? "paper" : "papers"}.`
+            : " Select bubbles, point weights, or the row settings icon for alternate answers and tags."}
+        </p>
+      )}
 
       <AnswerKeyGrid
         questionCount={questionCount}
@@ -382,7 +543,7 @@ export function AnswerKeyTab({
         onOpenDetail={(qIdx) => setDetailQuestionIdx(qIdx)}
         onOpenBulkPoints={() => {
           setBulkPointsStr("1");
-          setBulkPointsError(null);
+          setBulkPointsTouched(false);
           setBulkPointsOpen(true);
         }}
       />
@@ -394,12 +555,10 @@ export function AnswerKeyTab({
             : "detail-closed"
         }
         open={detailQuestionIdx !== null}
-        questionNumber={detailQuestionIdx !== null ? detailQuestionIdx + 1 : null}
-        activeVersionLabel={
-          effectiveActiveVersion === "A"
-            ? "A: Primary"
-            : `Key ${effectiveActiveVersion}`
+        questionNumber={
+          detailQuestionIdx !== null ? detailQuestionIdx + 1 : null
         }
+        activeVersionLabel={`Key ${effectiveActiveVersion}`}
         entry={
           detailQuestionIdx !== null
             ? (activeDraft.answerKey[detailQuestionIdx] ?? "")
@@ -436,31 +595,86 @@ export function AnswerKeyTab({
       />
 
       <Dialog
+        open={clearConfirmOpen}
+        title={`Clear all answers in Key ${effectiveActiveVersion}?`}
+        description={`Clears all ${questionCount} selected answers in Key ${effectiveActiveVersion}.${paperCount > 0 ? ` Saving afterwards will regrade ${paperCount} ${paperCount === 1 ? "paper" : "papers"}.` : ""}`}
+        confirmLabel="Clear answers"
+        confirmVariant="danger"
+        onConfirm={handleConfirmClearAll}
+        onClose={() => setClearConfirmOpen(false)}
+      />
+
+      <Dialog
         open={bulkPointsOpen}
-        title={`Set all points (${effectiveActiveVersion === "A" ? "A: Primary" : `Key ${effectiveActiveVersion}`})`}
+        title={`Set all points (Key ${effectiveActiveVersion})`}
         description="Apply the same point value (decimals allowed, e.g. 0.5, 1, 2.5) to every question in this key version."
-        confirmLabel="Apply to all"
-        onConfirm={handleApplyBulkPoints}
-        onClose={() => setBulkPointsOpen(false)}
+        busy={false}
+        hideFooter
+        onClose={() => {
+          setBulkPointsOpen(false);
+          setBulkPointsTouched(false);
+        }}
       >
-        <div className="space-y-3">
-          <FormField id="bulk-points-input" label="Points per question">
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleApplyBulkPoints();
+          }}
+          className="space-y-4"
+        >
+          <div className="flex flex-wrap items-center gap-1.5">
+            {["0.5", "1", "2"].map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => {
+                  setBulkPointsStr(preset);
+                  setBulkPointsTouched(false);
+                }}
+                className={`min-h-8 rounded-md border px-2.5 py-1 text-xs font-medium tabular-nums transition-colors ${
+                  bulkPointsStr === preset
+                    ? "border-[var(--brand)] bg-[var(--brand-subtle)] text-[var(--brand-text)]"
+                    : "border-[var(--border-hairline)] bg-[var(--bg-surface)] text-[var(--text-primary)] hover:border-[var(--border-strong)]"
+                }`}
+              >
+                {preset} {preset === "1" ? "pt" : "pts"}
+              </button>
+            ))}
+          </div>
+          <FormField
+            id="bulk-points-input"
+            label="Points per question"
+            error={bulkPointsTouched ? bulkPointsError : null}
+          >
             <TextInput
               id="bulk-points-input"
               type="number"
               step="0.25"
               min="0"
+              hasError={Boolean(bulkPointsTouched && bulkPointsError)}
               value={bulkPointsStr}
+              onBlur={() => setBulkPointsTouched(true)}
               onChange={(e) => setBulkPointsStr(e.target.value)}
               className="font-mono tabular-nums"
             />
           </FormField>
-          {bulkPointsError && (
-            <p className="text-[13px] text-[var(--danger-text)]">
-              {bulkPointsError}
-            </p>
-          )}
-        </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              variant="secondary"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setBulkPointsOpen(false);
+                setBulkPointsTouched(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary">
+              Apply to all
+            </Button>
+          </div>
+        </form>
       </Dialog>
     </Card>
   );
