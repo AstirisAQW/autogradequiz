@@ -33,8 +33,6 @@ select = ["E", "F", "I"]
 where = ["."]
 include = ["app*"]
 
-[tool.setuptools.package-data]
-"app" = ["test_ui.html"]
-
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 python_classes = ["*Tests"]

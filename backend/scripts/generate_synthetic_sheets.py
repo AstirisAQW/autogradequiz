@@ -1,19 +1,3 @@
-"""Write synthetic sample sheets to disk for local inspection.
-
-Nothing in the pipeline writes these files automatically -- generate_synthetic_sheet()
-returns an in-memory image, and the pytest suite only ever saves ground truth JSON into a
-throwaway tmp_path that pytest deletes after the run. Run this script directly to get real
-files on disk: one PNG (and, with --pdf, one PDF) per sheet, plus the seed and answer key
-as JSON, so you can open a sheet and see what the generator actually drew.
-
-Usage:
-    python scripts/generate_synthetic_sheets.py
-    python scripts/generate_synthetic_sheets.py --templates 20q_a4 --count 10 --pdf
-    python scripts/generate_synthetic_sheets.py --start-seed 100 --count 3
-
-Files land under <autograde_data_dir>/synthetic_sheets/<template_id>/seed_NNNN.{png,json[,pdf]}
-"""
-
 import argparse
 from pathlib import Path
 
@@ -23,8 +7,8 @@ from PIL import Image
 from app.answer_sheet_templates.catalog import list_template_specs
 from app.answer_sheet_templates.layout_spec import TemplateSpec
 from app.config import get_settings
-from app.synthetic_sheets.generator import generate_synthetic_sheet
-from app.synthetic_sheets.ground_truth import save_ground_truth
+from tests.synthetic_sheets.generator import generate_synthetic_sheet
+from tests.synthetic_sheets.ground_truth import save_ground_truth
 
 
 def synthetic_sheets_output_dir() -> Path:

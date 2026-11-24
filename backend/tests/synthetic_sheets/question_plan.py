@@ -1,7 +1,3 @@
-"""Ground truth for what a hand-grader would write down for each question: the correct
-choice, and which choice(s) (if any) got marked, and how cleanly.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,11 +10,6 @@ from app.answer_sheet_templates.layout_spec import TemplateSpec
 
 
 class QuestionMarkKind(Enum):
-    """The per-question defect types from the sample-sheet spec.
-
-    STRAY marks are handled separately at the page level since they aren't tied to any
-    one bubble; see stray_marks.py.
-    """
 
     PERFECT = "perfect"
     INCOMPLETE = "incomplete"
@@ -38,12 +29,10 @@ QUESTION_MARK_WEIGHTS: tuple[tuple[QuestionMarkKind, float], ...] = (
     (QuestionMarkKind.BLANK, 0.06),
     (QuestionMarkKind.DOUBLE, 0.04),
 )
-"""Roughly realistic mix for one sheet: mostly clean fills, a long tail of messier ones."""
 
 
 @dataclass(frozen=True)
 class QuestionPlan:
-    """Ground truth for one question: what a hand-grader would write down."""
 
     question_number: int
     correct_choice: str
@@ -52,10 +41,6 @@ class QuestionPlan:
 
 
 def generate_answer_key(question_count: int, rng: np.random.Generator) -> list[str]:
-    """An answer key independent of any one sheet's marks: as in real usage, where a
-    test's answer key is set once and graded against many different student sheets, not
-    invented fresh per sheet.
-    """
     return [str(choice) for choice in rng.choice(ANSWER_CHOICES, size=question_count)]
 
 
@@ -64,12 +49,6 @@ def generate_question_plans(
     rng: np.random.Generator,
     answer_key: list[str] | None = None,
 ) -> tuple[QuestionPlan, ...]:
-    """Ground truth for every question on one sheet.
-
-    answer_key, when given, fixes each question's correct_choice instead of drawing it
-    from rng -- so the same key can be graded against many independently-generated
-    sheets, the way one real test's answer key is graded against a batch of scans.
-    """
     kinds = [kind for kind, _ in QUESTION_MARK_WEIGHTS]
     weights = [weight for _, weight in QUESTION_MARK_WEIGHTS]
 

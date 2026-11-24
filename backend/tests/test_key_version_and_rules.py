@@ -10,9 +10,9 @@ from app.bubble_grading.classifier import (
     classify_key_version,
 )
 from app.bubble_grading.scoring import QuestionOutcome, QuestionRule, score_sheet
-from app.scan_alignment.align_scan import align_scan
+from app.scan_alignment.aligner import align_scan
 from app.sheet_rendering.renderer import render_sheet
-from app.synthetic_sheets.generator import generate_synthetic_sheet
+from tests.synthetic_sheets.generator import generate_synthetic_sheet
 
 
 @pytest.mark.parametrize("expected_kv", ["A", "B", "C", "D"])
@@ -55,9 +55,7 @@ def test_score_sheet_supports_partial_credit_and_attempted_incorrect_points():
     assert summary.question_outcomes[3] == QuestionOutcome.BLANK
     assert summary.question_outcomes[4] == QuestionOutcome.WRONG
     assert summary.partial_count == 1
-    # Q1=1.0 (alt), Q2=-0.5 (wrong), Q3=0.0 (blank), Q4=+0.25 (wrong attempt credit) -> 0.75
     assert summary.earned_points == pytest.approx(0.75)
-    # Max weights: Q1..Q3=2.0, Q4=max(2.0, 3.0)=3.0 -> 9.0
     assert summary.total_points == pytest.approx(9.0)
 
 

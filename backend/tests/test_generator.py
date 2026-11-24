@@ -5,17 +5,17 @@ import numpy as np
 from app.answer_sheet_templates.builder import PAGE
 from app.answer_sheet_templates.catalog import TWENTY_QUESTIONS
 from app.answer_sheet_templates.geometry import mm_to_px
-from app.synthetic_sheets.generator import generate_synthetic_sheet
-from app.synthetic_sheets.ground_truth import (
+from tests.synthetic_sheets.generator import generate_synthetic_sheet
+from tests.synthetic_sheets.ground_truth import (
     save_ground_truth,
     synthetic_sheet_ground_truth_to_dict,
 )
-from app.synthetic_sheets.question_plan import (
+from tests.synthetic_sheets.question_plan import (
     QuestionMarkKind,
     generate_answer_key,
     generate_question_plans,
 )
-from app.synthetic_sheets.stray_marks import STRAY_MARK_MAX_COUNT, STRAY_MARK_MIN_COUNT
+from tests.synthetic_sheets.stray_marks import STRAY_MARK_MAX_COUNT, STRAY_MARK_MIN_COUNT
 
 
 def test_same_seed_is_byte_for_byte_reproducible():
@@ -85,8 +85,6 @@ def test_generate_synthetic_sheet_grades_against_a_supplied_answer_key():
 
 
 def test_one_answer_key_can_be_shared_across_a_batch_of_sheets():
-    """The real-world shape this exists for: one test has one answer key, graded
-    against many different students' sheets."""
     rng = np.random.default_rng(500)
     answer_key = generate_answer_key(TWENTY_QUESTIONS.question_count, rng)
 

@@ -1,7 +1,3 @@
-"""Draws one question's mark onto a rendered sheet, in whatever shape its QuestionPlan
-calls for.
-"""
-
 from __future__ import annotations
 
 import cv2
@@ -10,18 +6,16 @@ import numpy as np
 from app.answer_sheet_templates.geometry import ANSWER_CHOICES, PageSize, bubble_position_px
 from app.answer_sheet_templates.layout_spec import TemplateSpec
 from app.sheet_rendering.renderer import BLACK
-from app.synthetic_sheets.question_plan import QuestionMarkKind, QuestionPlan
+from tests.synthetic_sheets.question_plan import QuestionMarkKind, QuestionPlan
 
 
 def draw_perfect_mark(canvas: np.ndarray, center_px: tuple[int, int], radius_px: int) -> None:
-    """Solid filled circle matching the bubble exactly."""
     cv2.circle(canvas, center_px, radius_px, BLACK, -1)
 
 
 def draw_incomplete_mark(
     canvas: np.ndarray, center_px: tuple[int, int], radius_px: int, rng: np.random.Generator
 ) -> str:
-    """A filled circle at 60-80% of the bubble radius, or a filled partial arc."""
     if rng.random() < 0.5:
         shrunk_radius = int(round(radius_px * rng.uniform(0.6, 0.8)))
         cv2.circle(canvas, center_px, max(shrunk_radius, 1), BLACK, -1)
@@ -44,7 +38,6 @@ def draw_incomplete_mark(
 def draw_light_mark(
     canvas: np.ndarray, center_px: tuple[int, int], radius_px: int, rng: np.random.Generator
 ) -> str:
-    """A fully-shaped fill, but in gray instead of black."""
     gray_value = int(rng.integers(130, 190))
     color = (gray_value, gray_value, gray_value)
     cv2.circle(canvas, center_px, radius_px, color, -1)
@@ -54,7 +47,6 @@ def draw_light_mark(
 def draw_off_center_mark(
     canvas: np.ndarray, center_px: tuple[int, int], radius_px: int, rng: np.random.Generator
 ) -> None:
-    """A solid fill shifted a few pixels away from the true bubble center."""
     shift_magnitude = int(rng.integers(2, 6))
     angle = float(rng.uniform(0, 2 * np.pi))
     dx = int(round(shift_magnitude * np.cos(angle)))
@@ -75,11 +67,6 @@ def _scribble_points(
 def draw_non_circular_mark(
     canvas: np.ndarray, center_px: tuple[int, int], radius_px: int, rng: np.random.Generator
 ) -> str:
-    """An X, a checkmark, or a scribble instead of a filled circle.
-
-    style is drawn uniformly from {0, 1, 2}: 0 draws an X, 1 draws a checkmark, 2 draws a
-    scribble (see _scribble_points).
-    """
     thickness = max(2, radius_px // 3)
     style = rng.integers(0, 3)
     cx, cy = center_px

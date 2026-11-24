@@ -11,15 +11,15 @@ from app.answer_sheet_templates.geometry import (
 )
 from app.bubble_grading.classifier import classify_sheet
 from app.bubble_grading.scoring import score_sheet
-from app.scan_alignment.align_scan import ScanAlignmentError, align_scan
+from app.scan_alignment.aligner import ScanAlignmentError, align_scan
 from app.sheet_rendering.renderer import (
     blank_canvas,
     render_sheet,
 )
-from app.synthetic_sheets.generator import generate_synthetic_sheet
-from app.synthetic_sheets.mark_drawing import draw_marks_for_plan, draw_perfect_mark
-from app.synthetic_sheets.question_plan import generate_answer_key, generate_question_plans
-from app.synthetic_sheets.scan_artifacts import (
+from tests.synthetic_sheets.generator import generate_synthetic_sheet
+from tests.synthetic_sheets.mark_drawing import draw_marks_for_plan, draw_perfect_mark
+from tests.synthetic_sheets.question_plan import generate_answer_key, generate_question_plans
+from tests.synthetic_sheets.scan_artifacts import (
     apply_gaussian_blur,
     apply_rotation_and_perspective,
 )
@@ -144,4 +144,21 @@ def test_align_scan_aligns_border_clipped_synthetic_seeds(template, seed):
     assert aligned.shape == sheet.image.shape
 
 
-
+def test_align_scan_handles_wide_camera_margin_outside_quarter_window():
+    rng = np.random.default_rng(53)
+    answer_key = generate_answer_key(TWENTY_QUESTIONS.question_count, rng)
+    sheet = _fully_marked_sheet_for_key(answer_key)
+    h, w = sheet.shape[:2]
+    pad_y, pad_x = int(h * 0.32), int(w * 0.32)
+    padded = cv2.copyMakeBorder(
+        sheet,
+        pad_y,
+        pad_y,
+        pad_x,
+        pad_x,
+        cv2.BORDER_CONSTANT,
+        value=(240, 240, 240),
+    )
+    aligned = align_scan(padded, TWENTY_QUESTIONS)
+    summary = score_sheet(classify_sheet(aligned, TWENTY_QUESTIONS), answer_key)
+    assert summary.score_fraction * 100 == 100.0

@@ -1,5 +1,3 @@
-"""Simulates the damage a real scan or phone photo does to a clean render."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -105,12 +103,6 @@ def apply_jpeg_compression(
 def apply_scan_artifacts(
     image: np.ndarray, rng: np.random.Generator
 ) -> tuple[np.ndarray, ScanArtifacts]:
-    """Simulate the damage a real scan or phone photo does to a clean render.
-
-    Order matters: physical distortions (rotation/skew, optical blur, exposure, sensor
-    noise) happen before the image is ever encoded, so JPEG compression -- which is what
-    actually happens last, at save time -- runs last here too.
-    """
     recorded: dict[str, Any] = {}
     image = apply_rotation_and_perspective(image, rng, recorded)
     image = apply_gaussian_blur(image, rng, recorded)

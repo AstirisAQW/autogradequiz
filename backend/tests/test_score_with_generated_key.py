@@ -6,15 +6,11 @@ from app.answer_sheet_templates.geometry import ANSWER_CHOICES, bubble_radius_px
 from app.bubble_grading.classifier import BubbleResult, classify_sheet
 from app.bubble_grading.scoring import QuestionOutcome, score_sheet
 from app.sheet_rendering.renderer import render_sheet
-from app.synthetic_sheets.mark_drawing import draw_marks_for_plan
-from app.synthetic_sheets.question_plan import generate_answer_key, generate_question_plans
+from tests.synthetic_sheets.mark_drawing import draw_marks_for_plan
+from tests.synthetic_sheets.question_plan import generate_answer_key, generate_question_plans
 
 
 def _aligned_sheet_against_key(template_spec, seed, answer_key):
-    """An aligned (no scan-artifact) synthetic sheet, marked independently of seed but
-    graded against answer_key -- the way a real student sheet is graded against a test's
-    pre-set answer key, rather than against something derived from its own marks.
-    """
     rng = np.random.default_rng(seed)
     canvas = render_sheet(template_spec, page=PAGE)
     radius_px = bubble_radius_px(template_spec, PAGE)
@@ -36,9 +32,6 @@ def test_generate_answer_key_returns_one_choice_per_question():
 
 
 def test_one_generated_key_scores_a_batch_of_independently_seeded_sheets():
-    """One answer key, several independently-seeded sheets: the batch-grading scenario
-    a real test run looks like, rather than each sheet grading against its own answers.
-    """
     key_rng = np.random.default_rng(99)
     answer_key = generate_answer_key(TWENTY_QUESTIONS.question_count, key_rng)
 
@@ -62,10 +55,6 @@ def test_one_generated_key_scores_a_batch_of_independently_seeded_sheets():
 
 
 def test_the_same_marks_score_differently_against_a_disagreeing_key():
-    """Proves score_sheet actually grades against whatever key it's given, not something
-    baked into the classified marks: any question correct against one key must not still
-    be correct against a key built to disagree with it everywhere.
-    """
     marks_rng = np.random.default_rng(1)
     answer_key = generate_answer_key(TWENTY_QUESTIONS.question_count, marks_rng)
     _, question_fills = _aligned_sheet_against_key(TWENTY_QUESTIONS, seed=7, answer_key=answer_key)

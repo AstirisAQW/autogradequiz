@@ -11,24 +11,13 @@ from app.bubble_grading.classifier import (
 )
 from app.bubble_grading.scoring import QuestionOutcome, score_sheet
 from app.sheet_rendering.renderer import render_sheet
-from app.synthetic_sheets.mark_drawing import draw_marks_for_plan
-from app.synthetic_sheets.question_plan import QuestionMarkKind, generate_question_plans
+from tests.synthetic_sheets.mark_drawing import draw_marks_for_plan
+from tests.synthetic_sheets.question_plan import QuestionMarkKind, generate_question_plans
 
 SEED_WITH_EVERY_MARK_KIND = 0
-"""Chosen because generate_question_plans(HUNDRED_QUESTIONS, ...) with this seed produces
-at least one question of every QuestionMarkKind, so a single sheet exercises every branch
-below."""
 
 
 def _classified_ground_truth():
-    """An aligned synthetic sheet (marks drawn, but no rotation/blur/noise/JPEG
-    simulation) plus its classification.
-
-    classify_sheet documents that it expects an already-aligned image; generate_synthetic
-    _sheet's scan-artifact simulation intentionally violates that, so comparing its output
-    against ground truth would be testing scan robustness, not classification, and the two
-    have different, separately-testable failure modes.
-    """
     rng = np.random.default_rng(SEED_WITH_EVERY_MARK_KIND)
     canvas = render_sheet(HUNDRED_QUESTIONS, page=PAGE)
     radius_px = bubble_radius_px(HUNDRED_QUESTIONS, PAGE)
@@ -68,9 +57,6 @@ def test_double_marks_classify_as_multiple():
 
 
 def test_incomplete_off_center_and_non_circular_marks_classify_as_filled_or_ambiguous():
-    """These defect kinds are drawn to be borderline by design, so the classifier is
-    allowed to call them either FILLED or AMBIGUOUS -- what it must never do is call a
-    non-blank, single mark BLANK or MULTIPLE."""
     question_plans, question_fills = _classified_ground_truth()
     borderline_kinds = {
         QuestionMarkKind.INCOMPLETE,
@@ -85,8 +71,6 @@ def test_incomplete_off_center_and_non_circular_marks_classify_as_filled_or_ambi
 
 
 def test_light_marks_never_read_as_blank_on_small_bubble_radii():
-    """With per-sheet normalized ink and row-relative classification, even LIGHT marks on
-    HUNDRED_QUESTIONS small bubbles must never silently read as BLANK."""
     question_plans, question_fills = _classified_ground_truth()
 
     for plan in question_plans:
@@ -124,13 +108,13 @@ def test_score_sheet_marks_correct_and_wrong_only_for_filled_questions():
             assert question_fills[question_number].result == BubbleResult.FILLED
 
 
-def test_clean_unmarked_template_has_trace_ratio_at_or_below_0_002():
+def test_clean_unmarked_template_has_peak_ink_at_or_below_0_002():
     for template in (TWENTY_QUESTIONS, FIFTY_QUESTIONS, HUNDRED_QUESTIONS):
         canvas = render_sheet(template, page=PAGE)
         fills = classify_sheet(canvas, template, PAGE)
         for fill in fills.values():
             for _, bubble_fill in fill.bubble_fills:
-                assert bubble_fill.trace_ratio <= 0.002
+                assert bubble_fill.peak_ink <= 0.002
 
 
 def test_printed_outline_alone_never_counts_as_trace():
@@ -141,14 +125,13 @@ def test_printed_outline_alone_never_counts_as_trace():
             assert fill.result == BubbleResult.BLANK
             assert fill.marked_choices == ()
             for _, bubble_fill in fill.bubble_fills:
-                assert bubble_fill.trace_ratio < DEFAULT_THRESHOLDS.blank_peak_floor
+                assert bubble_fill.peak_ink < DEFAULT_THRESHOLDS.blank_peak_floor
 
 
 def test_faint_gray_mark_is_detected_and_clean_blank_reads_blank():
     canvas = render_sheet(TWENTY_QUESTIONS, page=PAGE)
     radius_px = bubble_radius_px(TWENTY_QUESTIONS, PAGE)
     center_b = bubble_position_px(TWENTY_QUESTIONS, 1, 1, PAGE)
-    # Gray 200 has normalized ink ~0.216: above blank_peak_floor, below filled_min_mean_ink.
     cv2.circle(canvas, center_b, radius_px, (200, 200, 200), -1)
 
     fills = classify_sheet(canvas, TWENTY_QUESTIONS, PAGE)
@@ -158,8 +141,8 @@ def test_faint_gray_mark_is_detected_and_clean_blank_reads_blank():
     assert q1.marked_choices == ("B",)
     assert q1.confidence > 0.0
     q1_b = dict(q1.bubble_fills)["B"]
-    assert q1_b.trace_ratio >= DEFAULT_THRESHOLDS.blank_peak_floor
-    assert q1_b.fill_ratio < DEFAULT_THRESHOLDS.filled_min_mean_ink
+    assert q1_b.peak_ink >= DEFAULT_THRESHOLDS.blank_peak_floor
+    assert q1_b.mean_ink < DEFAULT_THRESHOLDS.filled_min_mean_ink
 
     q2 = fills[2]
     assert q2.result == BubbleResult.BLANK
